@@ -1,0 +1,203 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #07090E;
+  color: #F1F5F9;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Glassmorphism helpers */
+.glass-panel {
+  background: rgba(17, 24, 39, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-header {
+  background: rgba(11, 15, 25, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.glass-input {
+  background: rgba(17, 24, 39, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.glass-input:focus-within {
+  border-color: rgba(139, 92, 246, 0.6);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.2);
+}
+
+/* Radiant glow effects */
+.radial-glow {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.15;
+}
+
+.glow-violet {
+  background: radial-gradient(circle, #8B5CF6 0%, transparent 70%);
+}
+
+.glow-cyan {
+  background: radial-gradient(circle, #06B6D4 0%, transparent 70%);
+}
+
+/* Markdown prose enhancements */
+.synora-prose {
+  color: #E2E8F0;
+  line-height: 1.7;
+}
+
+.synora-prose p {
+  margin-bottom: 1rem;
+}
+
+.synora-prose p:last-child {
+  margin-bottom: 0;
+}
+
+.synora-prose h1, .synora-prose h2, .synora-prose h3, .synora-prose h4 {
+  color: #F8FAFC;
+  font-weight: 700;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.02em;
+}
+
+.synora-prose h1 { font-size: 1.5rem; }
+.synora-prose h2 { font-size: 1.28rem; }
+.synora-prose h3 { font-size: 1.12rem; }
+
+.synora-prose code:not(pre code) {
+  background: rgba(139, 92, 246, 0.14);
+  color: #C4B5FD;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.35rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875em;
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.synora-prose pre {
+  margin: 1rem 0;
+  border-radius: 0.75rem;
+  background: #0D121F;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow-x: auto;
+}
+
+.synora-prose pre code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #E2E8F0;
+  display: block;
+  padding: 1rem;
+}
+
+.synora-prose ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.synora-prose ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.synora-prose li {
+  margin-bottom: 0.35rem;
+}
+
+.synora-prose blockquote {
+  border-left: 3px solid #8B5CF6;
+  padding-left: 1rem;
+  font-style: italic;
+  color: #94A3B8;
+  margin: 1rem 0;
+  background: rgba(139, 92, 246, 0.05);
+  border-radius: 0 0.5rem 0.5rem 0;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.synora-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+
+.synora-prose th {
+  background: rgba(255, 255, 255, 0.05);
+  color: #F1F5F9;
+  text-align: left;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  font-weight: 600;
+}
+
+.synora-prose td {
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: #CBD5E1;
+}
+
+.synora-prose hr {
+  border: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 1.5rem 0;
+}
