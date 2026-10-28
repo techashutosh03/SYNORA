@@ -10,7 +10,8 @@ import {
   CheckCircle2, 
   RotateCw,
   HardDrive,
-  Info
+  Info,
+  Terminal
 } from 'lucide-react';
 
 export default function ModelActivityDrawer({
@@ -83,6 +84,30 @@ export default function ModelActivityDrawer({
 
           <p className="text-[11px] text-slate-400 leading-relaxed">
             Strict sequential execution: SYNORA passing <code className="text-purple-300">keep_alive=0</code> to unload each model immediately after its stage.
+          </p>
+        </div>
+
+        {/* Claw Code Native Tool Arsenal */}
+        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+              <Terminal className="w-4 h-4 text-cyan-400" />
+              Claw Code Tool Arsenal
+            </span>
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+              7 Native Tools Active
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {['bash', 'read_file', 'write_file', 'edit_file', 'grep_search', 'glob_files', 'list_dir'].map(tool => (
+              <span key={tool} className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700/60">
+                {tool}
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-400">
+            Enables autonomous filesystem search, surgical diffs, and sandboxed terminal execution.
           </p>
         </div>
 

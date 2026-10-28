@@ -70,6 +70,15 @@ function CodeBlock({ node, inline, className, children, ...props }) {
 }
 
 function ExecutionStatus({ message }) {
+  if (message.is_agent_mode) {
+    return (
+      <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-medium flex items-center gap-1">
+        <Terminal className="w-3 h-3 text-cyan-400" />
+        Claw Agent Execution
+      </span>
+    );
+  }
+
   if (message.error) {
     return (
       <span className="px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-400 text-[10px] font-medium flex items-center gap-1">

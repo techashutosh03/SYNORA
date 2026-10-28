@@ -28,6 +28,7 @@ class RoutingDecision(BaseModel):
     recommended_models: List[str]
     plan: OrchestrationPlan
     routing_time_ms: float = 0.0
+    is_agentic_task: bool = False
 
 MULTILINGUAL_GREETINGS = {
     # English
@@ -226,12 +227,22 @@ class Router:
         else:
             complexity = "medium"
 
+        # Check if the user is requesting direct tool/agent execution
+        agentic_indicators = [
+            "create file", "write file", "edit file", "delete file", "run command",
+            "execute command", "bash", "terminal", "run tests", "pytest", "npm install",
+            "git status", "git commit", "fix bug in file", "read file", "grep",
+            "search codebase", "clone", "compile", "build the project", "run the script"
+        ]
+        is_agentic_task = any(ind in prompt_lower for ind in agentic_indicators)
+
         return {
             "task_type": best_domain,
             "sub_domain": sub_domain,
             "complexity": complexity,
             "is_follow_up": is_follow_up,
-            "confidence": min(0.75 + (domain_scores.get(best_domain, 1) * 0.05), 0.99)
+            "confidence": min(0.75 + (domain_scores.get(best_domain, 1) * 0.05), 0.99),
+            "is_agentic_task": is_agentic_task
         }
 
     def build_plan(
@@ -453,7 +464,8 @@ class Router:
             confidence=analysis["confidence"],
             recommended_models=models,
             plan=plan,
-            routing_time_ms=round(elapsed_ms, 3)
+            routing_time_ms=round(elapsed_ms, 3),
+            is_agentic_task=analysis.get("is_agentic_task", False)
         )
 
 router = Router()

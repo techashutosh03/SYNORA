@@ -18,6 +18,7 @@ from backend.core.evaluator import evaluator, EvaluationMetric
 from backend.core.memory import memory
 from backend.core.monitor import monitor
 from backend.database.sqlite import save_chat_record, get_recent_history, get_session_history, get_all_sessions
+from backend.agent import tool_manager, permission_enforcer, agent_loop
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -91,6 +92,20 @@ class SettingsUpdateRequest(BaseModel):
     allow_simulation: Optional[bool] = None
     max_loaded_models: Optional[int] = None
     keep_alive: Optional[int] = None
+
+class AgentTaskRequest(BaseModel):
+    task: str = Field(..., description="Coding or execution task description")
+    model_id: Optional[str] = Field(default="qwen2.5-coder:7b", description="Model ID to execute agent loop")
+    max_turns: int = Field(default=12, ge=1, le=30)
+    workspace_root: Optional[str] = None
+
+class DirectToolExecuteRequest(BaseModel):
+    tool_name: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+
+class PermissionModeRequest(BaseModel):
+    mode: str = Field(..., description="'autonomous', 'ask', or 'read_only'")
+
 
 # --- API Endpoints ---
 
@@ -619,3 +634,73 @@ def get_history(limit: int = Query(default=20, ge=1, le=100)):
         "count": len(records),
         "history": records
     }
+
+# ==========================================
+# 🦞 SYNORA AGENT ENGINE (POWERED BY CLAW CODE)
+# ==========================================
+
+@app.post("/api/agent/task")
+async def run_agent_task(req: AgentTaskRequest):
+    """
+    Executes an autonomous coding task using Claw Code native tools (bash, edit_file, read_file, grep, etc.).
+    """
+    result = await agent_loop.run(
+        task=req.task,
+        model_id=req.model_id or "qwen2.5-coder:7b",
+        max_turns=req.max_turns,
+        workspace_root=req.workspace_root
+    )
+    return result.model_dump()
+
+@app.post("/api/agent/stream")
+async def stream_agent_task(req: AgentTaskRequest):
+    """
+    Streams live real-time SSE events of tool calls, bash outputs, and model reasoning steps.
+    """
+    generator = agent_loop.stream(
+        task=req.task,
+        model_id=req.model_id or "qwen2.5-coder:7b",
+        max_turns=req.max_turns,
+        workspace_root=req.workspace_root
+    )
+    return StreamingResponse(generator, media_type="text/event-stream")
+
+@app.get("/api/agent/tools")
+def get_available_tools():
+    """
+    Returns list of all Claw Code tools registered in SYNORA.
+    """
+    tools = tool_manager.get_tool_definitions()
+    return {
+        "tools_count": len(tools),
+        "tools": tools
+    }
+
+@app.post("/api/agent/execute")
+async def execute_tool_directly(req: DirectToolExecuteRequest):
+    """
+    Directly executes a tool and returns its output.
+    """
+    decision = permission_enforcer.check_tool_permission(req.tool_name, req.arguments)
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=decision.reason or "Permission denied")
+    result = await tool_manager.dispatch(req.tool_name, req.arguments)
+    return result.model_dump()
+
+@app.get("/api/agent/permissions")
+def get_permission_mode():
+    return {
+        "mode": permission_enforcer.mode,
+        "available_modes": ["autonomous", "ask", "read_only"]
+    }
+
+@app.post("/api/agent/permissions")
+def update_permission_mode(req: PermissionModeRequest):
+    if req.mode not in ("autonomous", "ask", "read_only"):
+        raise HTTPException(status_code=400, detail="Invalid mode. Choose 'autonomous', 'ask', or 'read_only'.")
+    permission_enforcer.set_mode(req.mode)
+    return {
+        "success": True,
+        "mode": permission_enforcer.mode
+    }
+

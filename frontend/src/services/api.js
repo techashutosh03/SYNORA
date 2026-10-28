@@ -180,3 +180,109 @@ export async function streamChatMessage({
     onError?.(err);
   }
 }
+
+/**
+ * Run Autonomous Agent Task (Claw Code Engine)
+ */
+export async function runAgentTask({ task, modelId, maxTurns = 12, workspaceRoot }) {
+  const res = await fetch(`${API_BASE}/api/agent/task`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      task,
+      model_id: modelId,
+      max_turns: maxTurns,
+      workspace_root: workspaceRoot,
+    }),
+  });
+  if (!res.ok) throw new Error(`Agent task failed: ${res.statusText}`);
+  return await res.json();
+}
+
+/**
+ * Stream Autonomous Agent Task via SSE
+ */
+export async function streamAgentTask({
+  task,
+  modelId,
+  maxTurns = 12,
+  workspaceRoot,
+  onStart,
+  onThought,
+  onToolStart,
+  onToolResult,
+  onComplete,
+  onError,
+}) {
+  try {
+    const res = await fetch(`${API_BASE}/api/agent/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        task,
+        model_id: modelId,
+        max_turns: maxTurns,
+        workspace_root: workspaceRoot,
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Agent stream request failed: ${res.statusText}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const jsonStr = trimmed.slice(5).trim();
+        try {
+          const data = JSON.parse(jsonStr);
+          switch (data.event) {
+            case 'start':
+              onStart?.(data);
+              break;
+            case 'thought':
+              onThought?.(data);
+              break;
+            case 'tool_start':
+              onToolStart?.(data);
+              break;
+            case 'tool_result':
+              onToolResult?.(data);
+              break;
+            case 'complete':
+              onComplete?.(data);
+              break;
+            case 'error':
+              onError?.(data);
+              break;
+            default:
+              break;
+          }
+        } catch (e) {
+          console.warn('Failed parsing agent SSE event:', jsonStr, e);
+        }
+      }
+    }
+  } catch (err) {
+    onError?.(err);
+  }
+}
+
+export async function fetchAgentTools() {
+  const res = await fetch(`${API_BASE}/api/agent/tools`);
+  if (!res.ok) throw new Error('Failed to fetch agent tools');
+  return await res.json();
+}
+

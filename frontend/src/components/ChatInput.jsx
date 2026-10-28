@@ -63,6 +63,7 @@ export default function ChatInput({
               className="bg-slate-900 border border-slate-700/70 text-slate-200 text-xs rounded-lg px-2.5 py-1 focus:outline-none focus:border-purple-500"
             >
               <option value="auto">Auto Orchestrator (Dynamic Classification)</option>
+              <option value="agent">⚡ Autonomous Agent Mode (Claw Code Tools & Execution)</option>
               <option value="coding">Manual Override: Coding Trio (Qwen + DeepSeek + Llama)</option>
               <option value="reasoning">Manual Override: Reasoning Focus (DeepSeek + Llama)</option>
             </select>

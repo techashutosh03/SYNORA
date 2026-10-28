@@ -150,6 +150,11 @@ The SYNORA AI user interface will be live at:
 | `/api/conversations` | `GET` | List all active conversation sessions and turn summaries |
 | `/api/conversations/{session_id}` | `GET` | Retrieve full chronological message history for a session |
 | `/api/history` | `GET` | Retrieve previous chat conversations and orchestration traces |
+| `/api/agent/task` | `POST` | Execute autonomous coding tasks using Claw Code tools (`bash`, `edit_file`, `grep`, etc.) |
+| `/api/agent/stream` | `POST` | Real-time SSE streaming of agent thoughts, tool execution, and diffs |
+| `/api/agent/tools` | `GET` | Retrieve the active catalog of native Claw Code tools |
+| `/api/agent/execute` | `POST` | Directly dispatch a single tool with security gate validation |
+| `/api/agent/permissions`| `GET/POST`| Inspect and configure permission mode (`autonomous`, `ask`, `read_only`) |
 
 ---
 
@@ -159,6 +164,8 @@ The SYNORA AI user interface will be live at:
 - [x] **v0.2**: Real Ollama server configuration, sequential M2 memory safeguards, unified collaborative synthesis.
 - [x] **v0.3**: Multi-turn conversation memory, intelligent multi-factor model selection, real-time performance monitoring.
 - [x] **v0.4**: Complete React + Vite + Tailwind CSS interface with live multi-model orchestration visualizer, streaming responses, conversation history, and model management.
-- [ ] **v0.5**: ChromaDB vector store, semantic RAG search & document embeddings.
+- [x] **v0.5**: **Claw Code Agent Engine Integration**: Native tool execution (`bash`, `edit_file`, `read_file`, `grep_search`, `glob_files`, `list_dir`), permission security gates, project memory context (`CLAUDE.md`/`AGENTS.md`), and real-time SSE agent streaming.
+- [ ] **v0.6**: ChromaDB vector store, semantic RAG search & document embeddings.
 - [ ] **v1.0**: Automated multi-stage testing, code execution sandbox, production deployment.
+
 
