@@ -28,11 +28,14 @@ export default function ChatArea({
   selectedPreset,
   setSelectedPreset,
 }) {
-  const scrollRef = useRef(null);
+  const scrollContainerRef = useRef(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
     }
   }, [messages, streamingText, streamingStage]);
 
@@ -62,7 +65,7 @@ export default function ChatArea({
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
       {/* Scrollable Messages Container */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl px-4 py-6">
           {messages.length === 0 ? (
             /* Empty State / Welcome Hero */
@@ -189,7 +192,6 @@ export default function ChatArea({
                 </div>
               )}
 
-              <div ref={scrollRef} />
             </div>
           )}
         </div>

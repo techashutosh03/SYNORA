@@ -77,7 +77,7 @@ export default function ClawStudio({ health, settings }) {
   const [doctorLoading, setDoctorLoading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
 
-  const eventsEndRef = useRef(null);
+  const scrollContainerRef = useRef(null);
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
 
@@ -107,7 +107,12 @@ export default function ClawStudio({ health, settings }) {
   }, []);
 
   useEffect(() => {
-    eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
   }, [streamEvents]);
 
   const handleSetWorkspace = async () => {
@@ -517,7 +522,7 @@ export default function ClawStudio({ health, settings }) {
       </div>
 
       {/* 3. MAIN WORKSPACE VIEWPORT */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4">
+      <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4">
         {/* TAB 1: EXECUTION STREAM */}
         {activeTab === 'stream' && (
           <div className="max-w-4xl mx-auto space-y-3">
@@ -812,7 +817,6 @@ export default function ClawStudio({ health, settings }) {
                 );
               })
             )}
-            <div ref={eventsEndRef} />
           </div>
         )}
 

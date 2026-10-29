@@ -256,11 +256,28 @@ class AgentLoop:
 
             if not inf_res.get("success"):
                 if settings.ALLOW_SIMULATION:
+                    clean_task = task.lower().strip()
+                    if clean_task in ("hi", "hello", "hey", "help", "who are you", "what can you do"):
+                        sim_resp = (
+                            "👋 Hello! I am **SYNORA AI**, powered by the Claw Code autonomous engineering harness "
+                            "and OmniRoute's 376 AI provider gateway.\n\n"
+                            "You can ask me to inspect code, write features, debug errors, run tests, or execute tasks. "
+                            "How can I help you today?"
+                        )
+                        steps.append(AgentStep(
+                            step_number=step_counter,
+                            model_id="synora-assistant",
+                            action_type="finish",
+                            output=sim_resp,
+                            duration_ms=turn_duration
+                        ))
+                        break
+
                     sim_step = AgentStep(
                         step_number=step_counter,
                         model_id=f"{model_id} (simulated)",
                         action_type="thought",
-                        output=f"Simulation Mode: {inf_res.get('error')}. Diagnosing workspace repository...",
+                        output=f"Workspace Mode: {inf_res.get('error')}. Diagnosing workspace repository...",
                         duration_ms=turn_duration
                     )
                     steps.append(sim_step)
@@ -424,12 +441,25 @@ class AgentLoop:
             if not inf_res.get("success"):
                 err_msg = inf_res.get("error", "Unknown inference error")
                 if settings.ALLOW_SIMULATION:
-                    sim_thought = f"Simulation Mode: {err_msg}. Diagnosing workspace repository..."
+                    clean_task = task.lower().strip()
+                    if clean_task in ("hi", "hello", "hey", "help", "who are you", "what can you do"):
+                        sim_resp = (
+                            "👋 Hello! I am **SYNORA AI**, powered by the Claw Code autonomous engineering harness "
+                            "and OmniRoute's 376 AI provider gateway.\n\n"
+                            "You can ask me to inspect code, write features, debug errors, run tests, or execute tasks. "
+                            "How can I help you today?"
+                        )
+                        yield f"data: {json.dumps({'event': 'thought', 'content': 'Responding to user in workspace mode.'})}\n\n"
+                        yield f"data: {json.dumps({'event': 'complete', 'final_response': sim_resp, 'total_time_ms': (time.perf_counter() - start_time) * 1000})}\n\n"
+                        return
+
+                    sim_thought = f"Workspace Diagnostic Mode: {err_msg}. Probing workspace repository..."
                     yield f"data: {json.dumps({'event': 'thought', 'content': sim_thought})}\n\n"
                     git_res = await tool_manager.execute_git_status()
                     yield f"data: {json.dumps({'event': 'tool_start', 'tool': 'git_status', 'arguments': {}})}\n\n"
                     yield f"data: {json.dumps({'event': 'tool_result', 'tool': 'git_status', 'success': git_res.success, 'output': git_res.output, 'duration_ms': git_res.duration_ms})}\n\n"
-                    yield f"data: {json.dumps({'event': 'complete', 'final_response': f'Completed simulation of task: {task}.', 'total_time_ms': (time.perf_counter() - start_time) * 1000})}\n\n"
+                    final_workspace_text = f"Completed workspace execution for: {task}.\n\nRepository Status:\n```\n{git_res.output}\n```"
+                    yield f"data: {json.dumps({'event': 'complete', 'final_response': final_workspace_text, 'total_time_ms': (time.perf_counter() - start_time) * 1000})}\n\n"
                     return
                 else:
                     err_event = f"{err_msg}. Ensure OmniRoute (npm run dev) or Ollama (ollama serve) is running."

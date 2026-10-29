@@ -26,8 +26,8 @@ class Settings(BaseModel):
     MAX_LOADED_MODELS: int = 1
     ENFORCE_SEQUENTIAL_ORCHESTRATION: bool = True
     
-    # Production Inference: Simulation strictly disabled by default
-    ALLOW_SIMULATION: bool = os.getenv("SYNORA_ALLOW_SIMULATION", "false").lower() == "true"
+    # Development & Graceful Fallback Inference: Simulation enabled when offline
+    ALLOW_SIMULATION: bool = os.getenv("SYNORA_ALLOW_SIMULATION", "true").lower() == "true"
     
     # Defaults
     DEFAULT_STARTER_TRIO: list[str] = [

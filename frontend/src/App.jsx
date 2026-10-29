@@ -145,7 +145,7 @@ export default function App() {
       try {
         await streamAgentTask({
           task: userPrompt,
-          modelId: 'qwen2.5-coder:7b',
+          modelId: 'auto',
           workspaceRoot: '.',
           signal: abortController.signal,
           onStart: (d) => {
@@ -357,7 +357,7 @@ export default function App() {
 
   return (
     <ErrorBoundary onReset={handleNewChat}>
-      <div className="h-dvh w-full flex overflow-hidden bg-[#07090E] text-slate-100 font-sans relative">
+      <div className="h-screen max-h-screen w-screen max-w-screen flex overflow-hidden bg-[#07090E] text-slate-100 font-sans relative fixed inset-0">
         {/* Background ambient radiant glows */}
         <div className="radial-glow glow-violet w-[500px] h-[500px] -top-40 -left-40 pointer-events-none" />
         <div className="radial-glow glow-cyan w-[600px] h-[600px] -bottom-60 -right-60 pointer-events-none" />
