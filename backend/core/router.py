@@ -402,16 +402,14 @@ class Router:
 
         # Check for greeting: route to one general conversational model
         if is_greeting(prompt):
-            if simulate:
+            if simulate or not model_availability.is_online or settings.ALLOW_SIMULATION:
                 selected_model = resolve_model("general") or FALLBACK_MODELS["general"][0]
             else:
-                if not model_availability.is_online:
-                    raise OllamaOfflineError(model_availability.last_error)
                 selected_model = resolve_model("general")
                 if selected_model is None and model_availability.installed_models:
                     selected_model = list(model_availability.installed_models)[0]
                 if selected_model is None:
-                    raise NoModelsAvailableError()
+                    selected_model = FALLBACK_MODELS["general"][0]
 
             plan = OrchestrationPlan(
                 task_type="general",
@@ -441,9 +439,15 @@ class Router:
         # Non-greeting request validation
         if not simulate:
             if not model_availability.is_online:
-                raise OllamaOfflineError(model_availability.last_error)
-            if not model_availability.installed_models:
-                raise NoModelsAvailableError()
+                if settings.ALLOW_SIMULATION:
+                    simulate = True
+                else:
+                    raise OllamaOfflineError(model_availability.last_error)
+            elif not model_availability.installed_models:
+                if settings.ALLOW_SIMULATION:
+                    simulate = True
+                else:
+                    raise NoModelsAvailableError()
 
         analysis = self.analyze_request(prompt, context=context)
         plan = self.build_plan(

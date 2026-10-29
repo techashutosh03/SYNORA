@@ -37,7 +37,7 @@ class OmniRouteClient:
     async def check_health(self) -> Dict[str, Any]:
         """Checks if OmniRoute gateway is running and returns available models count."""
         try:
-            async with httpx.AsyncClient(timeout=4.0) as client:
+            async with httpx.AsyncClient(timeout=1.5) as client:
                 res = await client.get(f"{self.base_url}/models", headers=self._headers())
                 if res.status_code == 200:
                     data = res.json()

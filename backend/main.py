@@ -439,7 +439,13 @@ async def chat_stream(request: ChatRequest):
     validate_inference_mode(request.simulate)
     is_simulated = bool(request.simulate)
 
+    # If neither OmniRoute nor Ollama is reachable, fallback gracefully to development simulation mode
+    if not is_simulated and not model_availability.is_online and settings.ALLOW_SIMULATION:
+        is_simulated = True
+
     async def event_generator():
+        # Flush initial SSE ping so HTTP 200 headers are delivered immediately to Vite proxy
+        yield ": ping\n\n"
         start_total = time.perf_counter()
         
         # 1. Context retrieval

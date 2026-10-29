@@ -44,12 +44,19 @@ class ModelAvailability:
         self.is_omniroute_online: bool = False
         self.last_error: Optional[str] = None
         self._mock_mode: bool = False
+        self._last_refresh_time: float = 0.0
 
-    async def refresh(self) -> Set[str]:
-        """Fetch installed/available models from both OmniRoute and Ollama."""
+    async def refresh(self, force: bool = False) -> Set[str]:
+        """Fetch installed/available models from both OmniRoute and Ollama with a 5s TTL cache."""
         if self._mock_mode:
             return self.installed_models
 
+        import time
+        now = time.time()
+        if not force and (now - self._last_refresh_time < 5.0) and self.installed_models:
+            return self.installed_models
+
+        self._last_refresh_time = now
         self.installed_models = set()
         self.ollama_models = set()
         self.omniroute_models = set()
@@ -77,7 +84,7 @@ class ModelAvailability:
 
         # 2. Probe Ollama Daemon
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=1.5) as client:
                 response = await client.get(f"{self.base_url}/api/tags")
                 if response.status_code == 200:
                     data = response.json()

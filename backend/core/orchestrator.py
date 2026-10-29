@@ -226,6 +226,15 @@ class Orchestrator:
         """
         role = stage.role.lower()
         model = stage.model_id
+
+        from backend.core.router import is_greeting
+        if is_greeting(user_prompt):
+            return (
+                "👋 Hello! I am **SYNORA AI**, your multi-model collaborative intelligence.\n\n"
+                "I unify open-weight models (Qwen for coding, DeepSeek for reasoning, and Llama for consensus) "
+                "supercharged by OmniRoute's 376 provider gateway and Claw Code's autonomous tools.\n\n"
+                "How can I assist you with your project today?"
+            )
         
         if role == "specialist" or len(stage_results) == 0:
             return (

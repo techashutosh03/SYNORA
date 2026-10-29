@@ -3,7 +3,9 @@
  * Robust, memory-safe communication with the local FastAPI backend.
  */
 
-const API_BASE = '';
+const API_BASE = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? (window.location.port === '8000' ? '' : 'http://127.0.0.1:8000')
+  : '';
 
 // ==========================================
 // SYSTEM & HEALTH
