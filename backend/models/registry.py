@@ -1,17 +1,23 @@
 from typing import Optional, List, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 class ModelProfile(BaseModel):
-    id: str = Field(..., description="Ollama model identifier, e.g. qwen2.5-coder:7b")
+    id: str = Field(..., description="Model identifier, e.g. qwen2.5-coder:7b or claude-3-7-sonnet")
     name: str = Field(..., description="Human-readable model name")
-    family: str = Field(..., description="Model family, e.g. Qwen, DeepSeek, Llama")
-    parameters: str = Field(..., description="Parameter size, e.g. 7B, 8B, 14B")
+    family: str = Field(..., description="Model family, e.g. Qwen, DeepSeek, Llama, Anthropic, OpenAI")
+    parameters: str = Field(..., description="Parameter size, e.g. 7B, 8B, 14B, Cloud")
     specialties: List[str] = Field(default_factory=list, description="Specialized domains, e.g. ['coding', 'python']")
     recommended_role: str = Field(..., description="Primary orchestration role: specialist, reviewer, synthesizer, router, evaluator")
     context_window: int = Field(default=8192, description="Maximum context window tokens")
-    is_installed: bool = Field(default=False, description="Whether currently downloaded in Ollama")
+    is_installed: bool = Field(default=False, description="Whether currently available in local Ollama or OmniRoute")
     is_active: bool = Field(default=True, description="Whether enabled in SYNORA routing pool")
-    tier: int = Field(default=2, description="1: Core Milestone 0.1, 2: Popular Specialists, 3: Advanced")
+    tier: int = Field(default=2, description="0: OmniRoute Cloud Flagship, 1: Core Milestone, 2: Popular Specialists, 3: Advanced")
+    provider: str = Field(default="ollama", description="Provider origin: ollama, omniroute, cloud")
+
+    @computed_field
+    @property
+    def specialty(self) -> str:
+        return self.specialties[0] if self.specialties else "general"
 
 class ModelRegistry:
     def __init__(self):
@@ -19,8 +25,109 @@ class ModelRegistry:
         self._load_default_catalog()
 
     def _load_default_catalog(self):
-        """Initializes catalog of 30 open-weight models across major families."""
+        """Initializes catalog of OmniRoute cloud flagships and 30 open-weight models."""
         catalog = [
+            # Tier 0: OmniRoute Cloud Flagship Models (376 Providers Gateway)
+            ModelProfile(
+                id="claude-3-7-sonnet",
+                name="Claude 3.7 Sonnet (OmniRoute)",
+                family="Anthropic",
+                parameters="Hybrid Reasoning/Code",
+                specialties=["coding", "refactoring", "architecture", "python", "typescript", "surgical-edits"],
+                recommended_role="specialist",
+                context_window=200000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="claude-3-5-sonnet",
+                name="Claude 3.5 Sonnet (OmniRoute)",
+                family="Anthropic",
+                parameters="Flagship",
+                specialties=["coding", "refactoring", "debugging", "python", "javascript"],
+                recommended_role="specialist",
+                context_window=200000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="gpt-4o",
+                name="OpenAI GPT-4o (OmniRoute)",
+                family="OpenAI",
+                parameters="Multimodal Flagship",
+                specialties=["synthesis", "general", "instruction", "writing", "analysis"],
+                recommended_role="synthesizer",
+                context_window=128000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="deepseek-reasoner",
+                name="DeepSeek R1 Reasoner (OmniRoute)",
+                family="DeepSeek",
+                parameters="671B MoE",
+                specialties=["reasoning", "logic", "review", "math", "security-audit"],
+                recommended_role="reviewer",
+                context_window=64000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="deepseek-chat",
+                name="DeepSeek V3 (OmniRoute)",
+                family="DeepSeek",
+                parameters="671B MoE",
+                specialties=["coding", "algorithms", "refactoring", "general"],
+                recommended_role="specialist",
+                context_window=64000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="gemini-2.0-flash",
+                name="Google Gemini 2.0 Flash (OmniRoute)",
+                family="Google",
+                parameters="Ultra-Fast",
+                specialties=["routing", "fast-classification", "synthesis", "multimodal"],
+                recommended_role="router",
+                context_window=1000000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="qwen-2.5-coder-32b",
+                name="Qwen 2.5 Coder 32B (OmniRoute)",
+                family="Qwen",
+                parameters="32B",
+                specialties=["coding", "refactoring", "debugging", "python", "backend"],
+                recommended_role="specialist",
+                context_window=32768,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="llama-3.3-70b",
+                name="Meta Llama 3.3 70B (OmniRoute)",
+                family="Llama",
+                parameters="70B",
+                specialties=["synthesis", "general", "explanation", "analysis"],
+                recommended_role="synthesizer",
+                context_window=128000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="omniroute-auto",
+                name="OmniRoute Auto-Combo Router",
+                family="OmniRoute",
+                parameters="Dynamic Ensemble",
+                specialties=["auto-fallback", "combo-routing", "cost-optimized", "resilience"],
+                recommended_role="router",
+                context_window=128000,
+                tier=0,
+                provider="omniroute"
+            ),
+
             # Tier 1: Core Milestone Trio & Fast Routers
             ModelProfile(
                 id="qwen2.5-coder:7b",
@@ -374,6 +481,58 @@ class ModelRegistry:
                 tag == base_id or tag.startswith(f"{base_id}:") for tag in normalized_tags
             )
             profile.is_installed = is_found
+
+    def sync_with_omniroute(self, omniroute_model_ids: List[str]):
+        """Marks OmniRoute models as installed and auto-registers new ones dynamically."""
+        norm_map = {m.strip().lower(): m.strip() for m in omniroute_model_ids}
+        for model_id, profile in self._models.items():
+            if profile.provider == "omniroute" or model_id.lower() in norm_map or any(base in model_id.lower() for base in norm_map):
+                profile.is_installed = True
+
+        # Dynamically register any models discovered from OmniRoute
+        for raw_id in omniroute_model_ids:
+            clean_id = raw_id.strip()
+            if clean_id not in self._models:
+                lower = clean_id.lower()
+                role = "general"
+                family = "Cloud"
+                specialties = ["omniroute", "cloud"]
+                if any(k in lower for k in ["code", "coder", "claude", "qwen"]):
+                    role = "specialist"
+                    specialties.extend(["coding", "refactoring"])
+                elif any(k in lower for k in ["reason", "r1", "o1", "o3", "deepseek"]):
+                    role = "reviewer"
+                    specialties.extend(["reasoning", "logic"])
+                elif any(k in lower for k in ["gpt-4", "llama", "gemini"]):
+                    role = "synthesizer"
+                    specialties.extend(["synthesis", "general"])
+
+                if "claude" in lower:
+                    family = "Anthropic"
+                elif "gpt" in lower or "o1" in lower or "o3" in lower:
+                    family = "OpenAI"
+                elif "gemini" in lower:
+                    family = "Google"
+                elif "deepseek" in lower:
+                    family = "DeepSeek"
+                elif "llama" in lower:
+                    family = "Meta"
+                elif "qwen" in lower:
+                    family = "Qwen"
+
+                self._models[clean_id] = ModelProfile(
+                    id=clean_id,
+                    name=clean_id,
+                    family=family,
+                    parameters="Cloud/API",
+                    specialties=specialties,
+                    recommended_role=role,
+                    context_window=128000,
+                    is_installed=True,
+                    is_active=True,
+                    tier=0,
+                    provider="omniroute"
+                )
 
     def set_active_models(self, model_ids: List[str]):
         """Selects which models are enabled in the active pool."""

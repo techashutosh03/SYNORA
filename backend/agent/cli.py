@@ -9,6 +9,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from backend.config import settings
 from backend.agent.commands import slash_command_registry
 from backend.agent.loop import agent_loop
 from backend.agent.tools import tool_manager
@@ -32,7 +33,7 @@ BANNER = f"""{MAGENTA}{BOLD}
 ██║     ██║     ███████║██║ █╗ ██║   ██║     ██║   ██║██║  ██║█████╗  
 ██║     ██║     ██╔══██║██║███╗██║   ██║     ██║   ██║██║  ██║██╔══╝  
 ╚██████╗███████╗██║  ██║╚███╔███╔╝   ╚██████╗╚██████╔╝██████╔╝███████╗
-{CYAN}    🦞 Powered by SYNORA AI · Multi-Model Autonomous Coding Harness{RESET}
+{CYAN}    🦞 Powered by SYNORA AI · Multi-Model Autonomous Coding Harness + OmniRoute Engine{RESET}
 """
 
 async def run_repl(workspace_root: str):
@@ -43,10 +44,17 @@ async def run_repl(workspace_root: str):
     slash_command_registry.set_workspace_root(str(ws_path))
 
     # Preflight quick status
+    from backend.core.model_availability import model_availability
+    await model_availability.refresh()
+    provider_str = "OmniRoute Gateway 🚀 (376 Providers)" if model_availability.is_omniroute_online else ("Ollama Local 🦙" if model_availability.is_ollama_online else "Simulation Mode 🧪")
+    active_model = settings.DEFAULT_CLAW_MODEL or "auto"
+
     git_res = await tool_manager.execute_git_status()
     mem_files = context_loader.discover_memory_files()
 
     print(f"{DIM}📁 Workspace:{RESET} {BOLD}{ws_path}{RESET}")
+    print(f"{DIM}⚡ Gateway:{RESET}   {GREEN}{provider_str}{RESET}")
+    print(f"{DIM}🎯 Model:{RESET}     {CYAN}{active_model}{RESET}")
     print(f"{DIM}🌿 Git:{RESET}       {GREEN}{git_res.output.splitlines()[0] if git_res.output else 'Clean'}{RESET}")
     print(f"{DIM}🛡️ Security:{RESET}  {YELLOW}{permission_enforcer.mode}{RESET}")
     if mem_files:
@@ -115,6 +123,8 @@ def main():
     parser.add_argument("command_or_task", nargs="*", help="Slash command (/doctor, /status, /diff, etc.) or prompt task to execute")
     parser.add_argument("--workspace", "-w", default=".", help="Workspace path to operate on (default: current directory)")
     parser.add_argument("--mode", "-m", choices=["autonomous", "ask", "read_only"], default=None, help="Security gate permission mode")
+    parser.add_argument("--model", "-M", default=None, help="Inference model (e.g. claude-3-7-sonnet, gpt-4o, qwen2.5-coder:7b)")
+    parser.add_argument("--provider", "-p", choices=["auto", "omniroute", "ollama"], default=None, help="Inference backend provider")
     parser.add_argument("--doctor", action="store_true", help="Run preflight doctor diagnostic check")
     parser.add_argument("--status", action="store_true", help="Inspect workspace and git status")
     parser.add_argument("--diff", action="store_true", help="View git diff of workspace modifications")
@@ -123,6 +133,10 @@ def main():
 
     if args.mode:
         permission_enforcer.set_mode(args.mode)
+    if args.model:
+        settings.DEFAULT_CLAW_MODEL = args.model
+    if args.provider:
+        settings.DEFAULT_PROVIDER = args.provider
 
     ws_path = str(Path(args.workspace).resolve())
 
@@ -144,7 +158,8 @@ def main():
         elif query.startswith("/"):
             asyncio.run(execute_single_slash(query, ws_path))
         else:
-            asyncio.run(execute_single_task(query, ws_path))
+            target_model = args.model or settings.DEFAULT_CLAW_MODEL or "auto"
+            asyncio.run(execute_single_task(query, ws_path, target_model))
     else:
         asyncio.run(run_repl(ws_path))
 
@@ -157,8 +172,8 @@ async def execute_single_slash(cmd: str, ws: str):
     else:
         print(f"{RED}{res.output}{RESET}")
 
-async def execute_single_task(task: str, ws: str):
-    res = await agent_loop.run(task=task, workspace_root=ws)
+async def execute_single_task(task: str, ws: str, model_id: str = "auto"):
+    res = await agent_loop.run(task=task, workspace_root=ws, model_id=model_id)
     print(f"{BOLD}{GREEN}🎯 Claw Agent Output:{RESET}\n")
     print(res.final_response)
 

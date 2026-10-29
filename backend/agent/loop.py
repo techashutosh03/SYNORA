@@ -40,6 +40,96 @@ class AgentLoop:
         self.base_url = base_url or settings.OLLAMA_BASE_URL
         self.keep_alive = settings.OLLAMA_KEEP_ALIVE
 
+    async def _execute_turn_inference(
+        self,
+        model_id: str,
+        messages: List[Dict[str, Any]],
+        tools_schema: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Executes a single turn inference via OmniRoute (376 providers gateway) or local Ollama.
+        """
+        from backend.core.model_availability import model_availability
+        from backend.core.omniroute_client import omniroute_client
+
+        prefer_omniroute = False
+        if settings.OMNIROUTE_ENABLED:
+            if model_availability.is_omniroute_model(model_id):
+                prefer_omniroute = True
+            elif settings.DEFAULT_PROVIDER == "omniroute":
+                prefer_omniroute = True
+            elif model_availability.is_omniroute_online and not model_availability.is_ollama_online:
+                prefer_omniroute = True
+
+        if prefer_omniroute:
+            res = await omniroute_client.chat_completion(
+                model=model_id,
+                messages=messages,
+                tools=tools_schema
+            )
+            if res.get("success"):
+                return {
+                    "success": True,
+                    "content": res.get("content", ""),
+                    "tool_calls": res.get("tool_calls", []),
+                    "provider": "omniroute"
+                }
+            if settings.OMNIROUTE_FALLBACK_TO_OLLAMA and model_availability.is_ollama_online:
+                pass
+            else:
+                return res
+
+        # Ollama local inference call
+        payload = {
+            "model": model_id,
+            "messages": messages,
+            "tools": tools_schema,
+            "stream": False,
+            "keep_alive": self.keep_alive
+        }
+        try:
+            async with httpx.AsyncClient(timeout=settings.OLLAMA_TIMEOUT_SECONDS) as client:
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    msg = data.get("message", {})
+                    return {
+                        "success": True,
+                        "content": msg.get("content", ""),
+                        "tool_calls": msg.get("tool_calls", []),
+                        "provider": "ollama"
+                    }
+                else:
+                    if settings.OMNIROUTE_ENABLED and model_availability.is_omniroute_online:
+                        omni_res = await omniroute_client.chat_completion(
+                            model=model_id,
+                            messages=messages,
+                            tools=tools_schema
+                        )
+                        if omni_res.get("success"):
+                            return omni_res
+                    return {
+                        "success": False,
+                        "content": "",
+                        "tool_calls": [],
+                        "error": f"Ollama HTTP {resp.status_code}: {resp.text}"
+                    }
+        except Exception as e:
+            if settings.OMNIROUTE_ENABLED and model_availability.is_omniroute_online:
+                omni_res = await omniroute_client.chat_completion(
+                    model=model_id,
+                    messages=messages,
+                    tools=tools_schema
+                )
+                if omni_res.get("success"):
+                    return omni_res
+            return {
+                "success": False,
+                "content": "",
+                "tool_calls": [],
+                "error": str(e)
+            }
+
     def _extract_fallback_tool_calls(self, text: str) -> List[Dict[str, Any]]:
         calls = []
         json_blocks = re.findall(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text)
@@ -112,6 +202,11 @@ class AgentLoop:
             context_loader.set_workspace_root(workspace_root)
             slash_command_registry.set_workspace_root(workspace_root)
 
+        if not model_id or model_id == "auto":
+            from backend.core.model_availability import model_availability
+            from backend.core.model_fallback import FALLBACK_MODELS
+            model_id = model_availability.select_available(FALLBACK_MODELS["coding"]) or "claude-3-7-sonnet"
+
         start_time = time.perf_counter()
 
         # Handle Slash Commands directly
@@ -137,6 +232,11 @@ class AgentLoop:
                 turns_count=1
             )
 
+        if not model_id or model_id == "auto":
+            from backend.core.model_availability import model_availability
+            from backend.core.model_fallback import FALLBACK_MODELS
+            model_id = model_availability.select_available(FALLBACK_MODELS["coding"]) or "claude-3-7-sonnet"
+
         tools_schema = tool_manager.get_tool_definitions()
         system_prompt = self._build_system_prompt()
 
@@ -151,72 +251,19 @@ class AgentLoop:
 
         for turn in range(max_turns):
             turn_start = time.perf_counter()
-            payload = {
-                "model": model_id,
-                "messages": messages,
-                "tools": tools_schema,
-                "stream": False,
-                "keep_alive": self.keep_alive
-            }
+            inf_res = await self._execute_turn_inference(model_id, messages, tools_schema)
+            turn_duration = (time.perf_counter() - turn_start) * 1000
 
-            try:
-                async with httpx.AsyncClient(timeout=settings.OLLAMA_TIMEOUT_SECONDS) as client:
-                    resp = await client.post(f"{self.base_url}/api/chat", json=payload)
-                    turn_duration = (time.perf_counter() - turn_start) * 1000
-
-                    if resp.status_code != 200:
-                        if settings.ALLOW_SIMULATION:
-                            sim_step = AgentStep(
-                                step_number=step_counter,
-                                model_id="qwen2.5-coder:7b (simulated)",
-                                action_type="thought",
-                                output=f"Simulation Mode: Analyzed task '{task}'. Running workspace status check.",
-                                duration_ms=turn_duration
-                            )
-                            steps.append(sim_step)
-                            git_res = await tool_manager.execute_git_status()
-                            steps.append(AgentStep(
-                                step_number=step_counter + 1,
-                                model_id="claw-engine",
-                                action_type="tool_call",
-                                tool_name="git_status",
-                                output=git_res.output,
-                                duration_ms=git_res.duration_ms
-                            ))
-                            steps.append(AgentStep(
-                                step_number=step_counter + 2,
-                                model_id="qwen2.5-coder:7b (simulated)",
-                                action_type="finish",
-                                output=f"Task execution verified for '{task}'. Workspace is active.",
-                                duration_ms=10.0
-                            ))
-                            break
-                        else:
-                            steps.append(AgentStep(
-                                step_number=step_counter,
-                                model_id=model_id,
-                                action_type="error",
-                                output=f"Ollama API HTTP {resp.status_code}: {resp.text}",
-                                success=False,
-                                duration_ms=turn_duration
-                            ))
-                            break
-
-                    data = resp.json()
-                    msg = data.get("message", {})
-                    content = msg.get("content", "")
-                    tool_calls = msg.get("tool_calls", [])
-
-            except Exception as e:
-                turn_duration = (time.perf_counter() - turn_start) * 1000
+            if not inf_res.get("success"):
                 if settings.ALLOW_SIMULATION:
-                    steps.append(AgentStep(
+                    sim_step = AgentStep(
                         step_number=step_counter,
-                        model_id="qwen2.5-coder:7b (dev-mode)",
+                        model_id=f"{model_id} (simulated)",
                         action_type="thought",
-                        output=f"Dev Mode: Ollama offline ({str(e)}). Executing workspace status check.",
+                        output=f"Simulation Mode: {inf_res.get('error')}. Diagnosing workspace repository...",
                         duration_ms=turn_duration
-                    ))
+                    )
+                    steps.append(sim_step)
                     git_res = await tool_manager.execute_git_status()
                     steps.append(AgentStep(
                         step_number=step_counter + 1,
@@ -228,10 +275,10 @@ class AgentLoop:
                     ))
                     steps.append(AgentStep(
                         step_number=step_counter + 2,
-                        model_id="qwen2.5-coder:7b (dev-mode)",
+                        model_id=f"{model_id} (simulated)",
                         action_type="finish",
-                        output=f"Processed task '{task}' in developer simulation mode. Pull Ollama model '{model_id}' to activate live neural reasoning.",
-                        duration_ms=15.0
+                        output=f"Task execution verified for '{task}'. Workspace is active.",
+                        duration_ms=10.0
                     ))
                     break
                 else:
@@ -239,11 +286,14 @@ class AgentLoop:
                         step_number=step_counter,
                         model_id=model_id,
                         action_type="error",
-                        output=f"Failed to communicate with Ollama: {str(e)}",
+                        output=f"Inference error: {inf_res.get('error')}. Start OmniRoute ('npm run dev') or Ollama ('ollama serve').",
                         success=False,
                         duration_ms=turn_duration
                     ))
                     break
+
+            content = inf_res.get("content", "")
+            tool_calls = inf_res.get("tool_calls", [])
 
             extracted_calls = []
             if tool_calls:
@@ -343,6 +393,11 @@ class AgentLoop:
             context_loader.set_workspace_root(workspace_root)
             slash_command_registry.set_workspace_root(workspace_root)
 
+        if not model_id or model_id == "auto":
+            from backend.core.model_availability import model_availability
+            from backend.core.model_fallback import FALLBACK_MODELS
+            model_id = model_availability.select_available(FALLBACK_MODELS["coding"]) or "claude-3-7-sonnet"
+
         start_time = time.perf_counter()
 
         if task.strip().startswith("/"):
@@ -365,45 +420,24 @@ class AgentLoop:
         tools_used = set()
 
         for turn in range(max_turns):
-            payload = {
-                "model": model_id,
-                "messages": messages,
-                "tools": tools_schema,
-                "stream": False,
-                "keep_alive": self.keep_alive
-            }
-
-            try:
-                async with httpx.AsyncClient(timeout=settings.OLLAMA_TIMEOUT_SECONDS) as client:
-                    resp = await client.post(f"{self.base_url}/api/chat", json=payload)
-                    if resp.status_code != 200:
-                        if settings.ALLOW_SIMULATION:
-                            yield f"data: {json.dumps({'event': 'thought', 'content': f'Simulation Mode: Ollama returned status {resp.status_code}. Diagnosing workspace repository...'})}\n\n"
-                            git_res = await tool_manager.execute_git_status()
-                            yield f"data: {json.dumps({'event': 'tool_start', 'tool': 'git_status', 'arguments': {}})}\n\n"
-                            yield f"data: {json.dumps({'event': 'tool_result', 'tool': 'git_status', 'success': git_res.success, 'output': git_res.output, 'duration_ms': git_res.duration_ms})}\n\n"
-                            yield f"data: {json.dumps({'event': 'complete', 'final_response': f'Completed simulation of task: {task}.', 'total_time_ms': (time.perf_counter() - start_time) * 1000})}\n\n"
-                            return
-                        else:
-                            yield f"data: {json.dumps({'event': 'error', 'message': f'Ollama HTTP {resp.status_code}'})}\n\n"
-                            break
-
-                    data = resp.json()
-                    msg = data.get("message", {})
-                    content = msg.get("content", "")
-                    tool_calls = msg.get("tool_calls", [])
-
-            except Exception as e:
+            inf_res = await self._execute_turn_inference(model_id, messages, tools_schema)
+            if not inf_res.get("success"):
+                err_msg = inf_res.get("error", "Unknown inference error")
                 if settings.ALLOW_SIMULATION:
-                    yield f"data: {json.dumps({'event': 'thought', 'content': f'Dev Mode: Ollama offline ({str(e)}). Running local workspace check...'})}\n\n"
+                    sim_thought = f"Simulation Mode: {err_msg}. Diagnosing workspace repository..."
+                    yield f"data: {json.dumps({'event': 'thought', 'content': sim_thought})}\n\n"
                     git_res = await tool_manager.execute_git_status()
                     yield f"data: {json.dumps({'event': 'tool_start', 'tool': 'git_status', 'arguments': {}})}\n\n"
                     yield f"data: {json.dumps({'event': 'tool_result', 'tool': 'git_status', 'success': git_res.success, 'output': git_res.output, 'duration_ms': git_res.duration_ms})}\n\n"
-                    yield f"data: {json.dumps({'event': 'complete', 'final_response': f'Completed task in dev simulation mode: {task}. Workspace verified.', 'total_time_ms': (time.perf_counter() - start_time) * 1000})}\n\n"
+                    yield f"data: {json.dumps({'event': 'complete', 'final_response': f'Completed simulation of task: {task}.', 'total_time_ms': (time.perf_counter() - start_time) * 1000})}\n\n"
                     return
                 else:
-                    yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
+                    err_event = f"{err_msg}. Ensure OmniRoute (npm run dev) or Ollama (ollama serve) is running."
+                    yield f"data: {json.dumps({'event': 'error', 'message': err_event})}\n\n"
                     break
+
+            content = inf_res.get("content", "")
+            tool_calls = inf_res.get("tool_calls", [])
 
             extracted_calls = []
             if tool_calls:

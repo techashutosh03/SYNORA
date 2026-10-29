@@ -31,6 +31,7 @@ export default function Header({
   const isSimulated = Boolean(settings?.allow_simulation);
   const ollamaStatus = health?.ollama?.status;
   const isOllamaConnected = ollamaStatus === 'connected';
+  const isOmniRouteConnected = Boolean(health?.omniroute?.online || health?.omniroute?.status === 'connected');
 
   return (
     <header className="h-16 px-4 md:px-6 glass-header flex items-center justify-between z-30 shrink-0">
@@ -82,18 +83,24 @@ export default function Header({
           <span className="relative flex h-2 w-2">
             <span
               className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                isOllamaConnected ? 'bg-emerald-400' : isSimulated ? 'bg-amber-400' : 'bg-rose-400'
+                isOmniRouteConnected ? 'bg-cyan-400' : isOllamaConnected ? 'bg-emerald-400' : isSimulated ? 'bg-amber-400' : 'bg-rose-400'
               }`}
             />
             <span
               className={`relative inline-flex rounded-full h-2 w-2 ${
-                isOllamaConnected ? 'bg-emerald-500' : isSimulated ? 'bg-amber-500' : 'bg-rose-500'
+                isOmniRouteConnected ? 'bg-cyan-500' : isOllamaConnected ? 'bg-emerald-500' : isSimulated ? 'bg-amber-500' : 'bg-rose-500'
               }`}
             />
           </span>
 
           <span className="text-slate-300 font-medium font-mono">
-            {isOllamaConnected ? 'Ollama Ready' : isSimulated ? 'Sim / Dev Mode' : 'Ollama Offline'}
+            {isOmniRouteConnected
+              ? `OmniRoute 376 Ready (${health?.omniroute?.models_count || 0})`
+              : isOllamaConnected
+              ? 'Ollama Ready'
+              : isSimulated
+              ? 'Sim / Dev Mode'
+              : 'Gateway Offline'}
           </span>
         </div>
       </div>

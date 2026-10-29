@@ -160,14 +160,16 @@ def update_settings(req: SettingsUpdateRequest):
 @app.get("/api/health")
 async def check_health():
     """
-    Checks system health, Ollama connectivity, storage health, and M2 optimization state.
+    Checks system health, OmniRoute AI Gateway, Ollama connectivity, storage health, and M2 optimization state.
     """
-    ollama_status = await orchestrator.check_ollama_health()
+    sys_health = await orchestrator.check_system_health()
     storage = monitor.get_storage_status()
     return {
         "status": "healthy",
         "version": settings.VERSION,
-        "ollama": ollama_status,
+        "omniroute": sys_health.get("omniroute"),
+        "ollama": sys_health.get("ollama"),
+        "active_provider": sys_health.get("active_provider"),
         "storage": storage,
         "allow_simulation": settings.ALLOW_SIMULATION,
         "m2_optimization": {
@@ -178,6 +180,25 @@ async def check_health():
         }
     }
 
+@app.get("/api/omniroute/status")
+async def get_omniroute_status():
+    """Returns real-time connectivity status and available models from OmniRoute gateway."""
+    from backend.core.omniroute_client import omniroute_client
+    return await omniroute_client.check_health()
+
+@app.post("/api/omniroute/sync")
+async def sync_omniroute():
+    """Syncs models from OmniRoute and updates the SYNORA model catalog."""
+    from backend.core.omniroute_client import omniroute_client
+    models = await omniroute_client.list_models()
+    model_ids = [m.get("id") for m in models if isinstance(m, dict) and "id" in m]
+    model_registry.sync_with_omniroute(model_ids)
+    return {
+        "status": "synced",
+        "synced_count": len(model_ids),
+        "models": model_ids
+    }
+
 @app.get("/api/models")
 async def list_models(
     specialty: Optional[str] = None,
@@ -186,9 +207,9 @@ async def list_models(
     active_only: bool = False
 ):
     """
-    Returns the catalog of 30 supported open-weight models with metadata.
+    Returns the catalog of supported models (OmniRoute cloud flagships + open-weight models).
     """
-    await orchestrator.check_ollama_health()
+    await model_availability.refresh()
     models = model_registry.list_models(
         specialty=specialty,
         role=role,
@@ -653,7 +674,7 @@ async def run_agent_task(req: AgentTaskRequest):
     """
     result = await agent_loop.run(
         task=req.task,
-        model_id=req.model_id or "qwen2.5-coder:7b",
+        model_id=req.model_id or "auto",
         max_turns=req.max_turns,
         workspace_root=req.workspace_root
     )
@@ -666,7 +687,7 @@ async def stream_agent_task(req: AgentTaskRequest):
     """
     generator = agent_loop.stream(
         task=req.task,
-        model_id=req.model_id or "qwen2.5-coder:7b",
+        model_id=req.model_id or "auto",
         max_turns=req.max_turns,
         workspace_root=req.workspace_root
     )

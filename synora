@@ -1,19 +1,125 @@
 #!/usr/bin/env python3
+"""
+SYNORA AI + CLAW CODE + OMNIROUTE UNIFIED LAUNCHER
+Many Minds. One Intelligence. Supercharged by 376 Providers.
+"""
+
 import sys
 import os
+import signal
 import subprocess
+import shutil
 from pathlib import Path
 
 root = Path(__file__).resolve().parent
+sys.path.insert(0, str(root))
 
-if len(sys.argv) > 1 and sys.argv[1] in ("claw", "agent"):
-    # Delegate to Claw Code CLI
-    sys.path.insert(0, str(root))
+CYAN = "\033[96m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+MAGENTA = "\033[95m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+
+BANNER = f"""{MAGENTA}{BOLD}
+ ██████╗██╗   ██╗███╗   ██╗ ██████╗ ██████╗  █████╗ 
+██╔════╝╚██╗ ██╔╝████╗  ██║██╔═══██╗██╔══██╗██╔══██╗
+╚█████╗  ╚████╔╝ ██╔██╗ ██║██║   ██║██████╔╝███████║
+ ╚═══██╗  ╚██╔╝  ██║╚██╗██║██║   ██║██╔══██╗██╔══██║
+██████╔╝   ██║   ██║ ╚████║╚██████╔╝██║  ██║██║  ██║
+╚═════╝    ╚═╝   ╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+{CYAN}  🦞 CLAW CODE AUTONOMOUS HARNESS  x  ⚡ OMNIROUTE 376 PROVIDERS{RESET}
+"""
+
+def print_help():
+    print(BANNER)
+    print(f"""{BOLD}Usage:{RESET} ./synora [command] [options]
+
+{BOLD}Commands:{RESET}
+  {GREEN}all{RESET} | {GREEN}dev{RESET}        Start the full stack: OmniRoute (20128) + SYNORA Backend (8000) + Frontend (5173)
+  {GREEN}claw{RESET} [task]       Launch Claw Code autonomous coding agent (CLI / REPL)
+  {GREEN}doctor{RESET}            Run preflight diagnostics across OmniRoute, Ollama, Node, and Python
+  {GREEN}omniroute{RESET}         Start only OmniRoute AI Proxy Gateway (port 20128)
+  {GREEN}backend{RESET}           Start only SYNORA FastAPI backend server (port 8000)
+  {GREEN}frontend{RESET}          Start only SYNORA Web UI & Claw Studio (port 5173)
+  {GREEN}help{RESET}              Display this help manual
+
+{BOLD}Examples:{RESET}
+  ./synora                  # Start all services concurrently
+  ./synora claw             # Open interactive Claw Code REPL
+  ./synora claw "Fix bug"   # Execute a single autonomous task
+  ./synora doctor           # Verify OmniRoute and system health
+""")
+
+def run_all():
+    print(BANNER)
+    print(f"{CYAN}🚀 Launching complete SYNORA AI + OmniRoute ecosystem...{RESET}")
+    print(f"  • {BOLD}OmniRoute Gateway:{RESET} http://localhost:20128/v1 (376 AI Providers)")
+    print(f"  • {BOLD}SYNORA Backend:{RESET}    http://localhost:8000 (FastAPI Orchestrator)")
+    print(f"  • {BOLD}SYNORA Web UI:{RESET}     http://localhost:5173 (Chat & Claw Studio)")
+    print(f"{DIM}Press Ctrl+C to stop all services cleanly.{RESET}\n")
+
+    cmd = [
+        "npx", "--yes", "concurrently",
+        "-k",
+        "-n", "omniroute,backend,frontend",
+        "-c", "blue,green,magenta",
+        "npm run dev",
+        f"{sys.executable} -m uvicorn backend.main:app --port 8000 --reload",
+        "npm --prefix frontend run dev"
+    ]
+    try:
+        subprocess.run(cmd, cwd=str(root))
+    except KeyboardInterrupt:
+        print(f"\n{YELLOW}🛑 All services stopped cleanly. Goodbye!{RESET}")
+
+def run_backend():
+    print(f"{GREEN}🚀 Starting SYNORA FastAPI Backend on port 8000...{RESET}")
+    cmd = [sys.executable, "-m", "uvicorn", "backend.main:app", "--port", "8000", "--reload"]
+    subprocess.run(cmd, cwd=str(root))
+
+def run_omniroute():
+    print(f"{CYAN}⚡ Starting OmniRoute AI Gateway on port 20128...{RESET}")
+    cmd = ["npm", "run", "dev"]
+    subprocess.run(cmd, cwd=str(root))
+
+def run_frontend():
+    print(f"{MAGENTA}🎨 Starting SYNORA Web UI on port 5173...{RESET}")
+    cmd = ["npm", "run", "dev"]
+    subprocess.run(cmd, cwd=str(root / "frontend"))
+
+def run_claw():
     from backend.agent.cli import main
     sys.argv.pop(1)
     main()
-else:
-    # Run uvicorn server
-    print("🚀 Launching SYNORA AI Multi-Model Server with Claw Code Engine...")
-    cmd = [sys.executable, "-m", "uvicorn", "backend.main:app", "--reload", "--port", "8000"]
-    subprocess.run(cmd, cwd=str(root))
+
+def run_doctor():
+    import asyncio
+    from backend.agent.commands import slash_command_registry
+    res = asyncio.run(slash_command_registry.cmd_doctor())
+    print(f"\n{GREEN}{res.output}{RESET}\n")
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        run_all()
+    else:
+        subcmd = sys.argv[1].lower()
+        if subcmd in ("all", "dev", "start"):
+            run_all()
+        elif subcmd in ("claw", "agent"):
+            run_claw()
+        elif subcmd in ("backend", "server", "api"):
+            run_backend()
+        elif subcmd in ("omniroute", "proxy", "gateway"):
+            run_omniroute()
+        elif subcmd in ("frontend", "ui", "web"):
+            run_frontend()
+        elif subcmd in ("doctor", "/doctor"):
+            run_doctor()
+        elif subcmd in ("help", "--help", "-h"):
+            print_help()
+        else:
+            # If argument does not match command, pass through to Claw Code
+            from backend.agent.cli import main
+            main()

@@ -23,8 +23,6 @@ export default function SettingsModal({
   onSettingsUpdated,
   health,
 }) {
-  if (!isOpen) return null;
-
   const [models, setModels] = useState([]);
   const [loadingModels, setLoadingModels] = useState(true);
   const [activeCategory, setActiveCategory] = useState('all');
@@ -39,8 +37,10 @@ export default function SettingsModal({
   }, [settings]);
 
   useEffect(() => {
-    loadModelCatalog();
-  }, []);
+    if (isOpen) {
+      loadModelCatalog();
+    }
+  }, [isOpen]);
 
   const loadModelCatalog = async () => {
     setLoadingModels(true);
@@ -82,10 +82,11 @@ export default function SettingsModal({
   const categories = ['all', 'coding', 'reasoning', 'creative', 'general', 'math'];
 
   const filteredModels = models.filter(m => {
-    const matchesCat = activeCategory === 'all' || m.specialty.toLowerCase() === activeCategory;
+    const spec = (m.specialty || (m.specialties && m.specialties[0]) || 'general').toLowerCase();
+    const matchesCat = activeCategory === 'all' || spec.includes(activeCategory);
     const matchesSearch = searchQuery === '' || 
-      m.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      m.id.toLowerCase().includes(searchQuery.toLowerCase());
+      (m.name && m.name.toLowerCase().includes(searchQuery.toLowerCase())) || 
+      (m.id && m.id.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesCat && matchesSearch;
   });
 
@@ -94,6 +95,8 @@ export default function SettingsModal({
     setCopiedCmd(true);
     setTimeout(() => setCopiedCmd(false), 2000);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fade-in">
@@ -217,10 +220,10 @@ export default function SettingsModal({
                         <div>
                           <div className="font-semibold text-xs flex items-center gap-1.5">
                             {m.name}
-                            <span className="font-mono text-[10px] text-purple-400">({m.parameter_size})</span>
+                            <span className="font-mono text-[10px] text-purple-400">({m.parameter_size || m.parameters || 'Cloud'})</span>
                           </div>
                           <div className="text-[10px] text-slate-500 font-mono">
-                            {m.id} • <span className="capitalize">{m.specialty}</span>
+                            {m.id} • <span className="capitalize">{m.specialty || (m.specialties && m.specialties[0]) || 'general'}</span>{m.provider === 'omniroute' ? ' • ⚡ OmniRoute' : ' • 🦙 Ollama'}
                           </div>
                         </div>
                       </div>

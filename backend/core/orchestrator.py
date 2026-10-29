@@ -57,6 +57,17 @@ class Orchestrator:
         self.base_url = base_url or settings.OLLAMA_BASE_URL
         self.keep_alive = settings.OLLAMA_KEEP_ALIVE
 
+    async def check_system_health(self) -> Dict[str, Any]:
+        """Checks both OmniRoute gateway and Ollama service health."""
+        from backend.core.omniroute_client import omniroute_client
+        omni_health = await omniroute_client.check_health()
+        ollama_health = await self.check_ollama_health()
+        return {
+            "omniroute": omni_health,
+            "ollama": ollama_health,
+            "active_provider": "omniroute" if omni_health.get("online") else ("ollama" if ollama_health.get("status") == "connected" else "simulation")
+        }
+
     async def check_ollama_health(self) -> Dict[str, Any]:
         """Checks if Ollama service is reachable and fetches local models."""
         try:
@@ -86,6 +97,53 @@ class Orchestrator:
                 "status": "error",
                 "message": str(e)
             }
+
+    async def _call_omniroute(
+        self,
+        model_id: str,
+        messages: List[Dict[str, str]]
+    ) -> Dict[str, Any]:
+        """
+        Executes a model inference call via OmniRoute's OpenAI-compatible API.
+        Routes through OmniRoute's intelligent provider pool (376 providers),
+        circuit breakers, and auto-fallbacks.
+        """
+        from backend.core.omniroute_client import omniroute_client
+        return await omniroute_client.chat_completion(model=model_id, messages=messages)
+
+    async def _call_model(
+        self,
+        model_id: str,
+        messages: List[Dict[str, str]],
+        keep_alive: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Intelligently dispatches inference to OmniRoute or local Ollama.
+        """
+        from backend.core.model_availability import model_availability
+        
+        prefer_omniroute = False
+        if settings.OMNIROUTE_ENABLED:
+            if model_availability.is_omniroute_model(model_id):
+                prefer_omniroute = True
+            elif settings.DEFAULT_PROVIDER == "omniroute":
+                prefer_omniroute = True
+            elif model_availability.is_omniroute_online and not model_availability.is_ollama_online:
+                prefer_omniroute = True
+
+        if prefer_omniroute:
+            res = await self._call_omniroute(model_id, messages)
+            if res.get("success"):
+                return res
+            # Fallback to Ollama if configured and available
+            if settings.OMNIROUTE_FALLBACK_TO_OLLAMA and model_availability.is_ollama_online:
+                return await self._call_ollama(model_id, messages, keep_alive=keep_alive)
+            return res
+        else:
+            res = await self._call_ollama(model_id, messages, keep_alive=keep_alive)
+            if not res.get("success") and settings.OMNIROUTE_ENABLED and model_availability.is_omniroute_online:
+                return await self._call_omniroute(model_id, messages)
+            return res
 
     async def _call_ollama(
         self,
@@ -321,8 +379,8 @@ class Orchestrator:
                     )
                     messages.append({"role": "user", "content": synthesis_prompt})
 
-                # Attempt inference call
-                res = await self._call_ollama(
+                # Attempt inference call via OmniRoute or Ollama
+                res = await self._call_model(
                     model_id=target_model,
                     messages=messages,
                     keep_alive=self.keep_alive
@@ -333,7 +391,7 @@ class Orchestrator:
                     fallback_model = self._find_installed_fallback(stage.role)
                     if fallback_model and fallback_model != target_model:
                         target_model = fallback_model
-                        res = await self._call_ollama(
+                        res = await self._call_model(
                             model_id=fallback_model,
                             messages=messages,
                             keep_alive=self.keep_alive
@@ -347,7 +405,7 @@ class Orchestrator:
                     raise OllamaInferenceError(
                         f"Inference failed for stage '{stage.stage_name}' using model '{stage.model_id}'. "
                         f"Reason: {res['error']}. "
-                        f"Please ensure Ollama is running ('ollama serve') and the model is downloaded ('ollama pull {stage.model_id}')."
+                        f"Please ensure OmniRoute is running ('npm run dev') or Ollama is running ('ollama serve')."
                     )
 
                 content = res["content"]
@@ -380,4 +438,7 @@ class Orchestrator:
             total_time_ms=round(total_time, 2),
             models_used=models_used
         )
+
+# Global singleton orchestrator instance
+orchestrator = Orchestrator()
 

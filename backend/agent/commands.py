@@ -102,7 +102,16 @@ class SlashCommandRegistry:
     async def cmd_doctor(self) -> SlashCommandResult:
         checks = []
 
-        # 1. Ollama Connectivity
+        # 1. OmniRoute AI Gateway Connectivity (376 Providers)
+        from backend.core.omniroute_client import omniroute_client
+        omni_health = await omniroute_client.check_health()
+        if omni_health.get("online"):
+            count = omni_health.get("models_count", 0)
+            checks.append(f"✅ [PASS] OmniRoute Gateway: Connected at {omni_health.get('base_url')} ({count} models/providers available with auto-fallback)")
+        else:
+            checks.append(f"ℹ️ [INFO] OmniRoute Gateway: Offline at {omni_health.get('base_url', settings.OMNIROUTE_BASE_URL)} (Start with 'npm run dev' to activate 376 cloud providers)")
+
+        # 2. Ollama Connectivity
         import httpx
         ollama_ok = False
         ollama_models = []
@@ -119,7 +128,7 @@ class SlashCommandRegistry:
         if ollama_ok:
             checks.append(f"✅ [PASS] Ollama Engine: Connected at {settings.OLLAMA_BASE_URL} ({len(ollama_models)} models found)")
         else:
-            checks.append(f"⚠️ [WARN] Ollama Engine: Offline or unreachable at {settings.OLLAMA_BASE_URL} (Running in simulation mode)")
+            checks.append(f"⚠️ [WARN] Ollama Engine: Offline or unreachable at {settings.OLLAMA_BASE_URL} (Running in simulation/OmniRoute mode)")
 
         # 2. Workspace & Git
         git_res = await tool_manager.execute_git_status()
@@ -293,8 +302,32 @@ Project guidelines and memory for Claw Code and SYNORA AI.
 
     def cmd_model(self, arg: str) -> SlashCommandResult:
         if arg.strip():
-            return SlashCommandResult(command="/model", success=True, output=f"🎯 Active coding model set to '{arg.strip()}'.")
-        return SlashCommandResult(command="/model", success=True, output="🎯 Current default model: 'qwen2.5-coder:7b' (Coding Trio: Qwen + DeepSeek + Llama)")
+            target = arg.strip()
+            settings.DEFAULT_CLAW_MODEL = target
+            return SlashCommandResult(command="/model", success=True, output=f"🎯 Active coding model switched to '{target}'.")
+        
+        current = settings.DEFAULT_CLAW_MODEL or "auto"
+        lines = [
+            f"🎯 Active Model: '{current}'",
+            "",
+            "OmniRoute Cloud Flagships (Available via 'npm run dev'):",
+            "  • claude-3-7-sonnet     - Anthropic Flagship (Hybrid Reasoning + Code)",
+            "  • claude-3-5-sonnet     - Top-tier coding & surgical refactoring",
+            "  • gpt-4o                - OpenAI Multi-modal synthesis & writing",
+            "  • deepseek-reasoner     - DeepSeek R1 deep logical review & audit",
+            "  • deepseek-chat         - DeepSeek V3 coding & algorithms",
+            "  • gemini-2.0-flash      - Google ultra-fast multi-modal router",
+            "  • qwen-2.5-coder-32b    - High-capacity coding model",
+            "  • omniroute-auto        - Autonomous multi-model combo routing",
+            "",
+            "Local Ollama Models (Available via 'ollama serve'):",
+            "  • qwen2.5-coder:7b      - Local coding specialist",
+            "  • deepseek-r1:7b        - Local reasoning reviewer",
+            "  • llama3.1:8b           - Local synthesis engine",
+            "",
+            "Usage: /model <model_id> (e.g. '/model claude-3-7-sonnet')"
+        ]
+        return SlashCommandResult(command="/model", success=True, output="\n".join(lines))
 
     def cmd_compact(self) -> SlashCommandResult:
         return SlashCommandResult(

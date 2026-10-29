@@ -59,6 +59,7 @@ export default function ClawStudio({ health, settings }) {
   const [gitStatus, setGitStatus] = useState('');
   const [memoryFiles, setMemoryFiles] = useState([]);
   const [permissionMode, setPermissionMode] = useState('autonomous');
+  const [selectedModel, setSelectedModel] = useState('auto');
 
   const [prompt, setPrompt] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
@@ -80,20 +81,6 @@ export default function ClawStudio({ health, settings }) {
   const textareaRef = useRef(null);
   const abortControllerRef = useRef(null);
 
-  useEffect(() => {
-    loadWorkspaceStatus();
-    return () => {
-      // Abort any pending stream on unmount
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [streamEvents]);
-
   const loadWorkspaceStatus = async () => {
     try {
       const data = await fetchClawStatus();
@@ -108,6 +95,20 @@ export default function ClawStudio({ health, settings }) {
       console.warn('Could not load workspace status:', err);
     }
   };
+
+  useEffect(() => {
+    loadWorkspaceStatus();
+    return () => {
+      // Abort any pending stream on unmount
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [streamEvents]);
 
   const handleSetWorkspace = async () => {
     if (!workspacePath.trim()) return;
@@ -231,13 +232,13 @@ export default function ClawStudio({ health, settings }) {
     try {
       await streamAgentTask({
         task: textToRun,
-        modelId: 'qwen2.5-coder:7b',
+        modelId: selectedModel || 'auto',
         workspaceRoot: workspacePath,
         signal: abortController.signal,
         onStart: (d) => {
           setStreamEvents(prev => [
             ...prev,
-            { id: Date.now(), type: 'start', model: safeString(d?.model || 'qwen2.5-coder:7b') }
+            { id: Date.now(), type: 'start', model: safeString(d?.model || selectedModel || 'auto') }
           ]);
         },
         onThought: (d) => {
@@ -403,6 +404,33 @@ export default function ClawStudio({ health, settings }) {
             >
               Read-Only
             </button>
+          </div>
+
+          {/* Model Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1">
+            <Cpu className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="bg-transparent text-[11px] font-mono text-slate-200 outline-none cursor-pointer max-w-[170px]"
+              title="Select Claw Code Reasoning & Coding Model"
+            >
+              <option value="auto" className="bg-slate-900 text-purple-300">⚡ Auto (Best Model)</option>
+              <optgroup label="OmniRoute Cloud Flagships" className="bg-slate-900 text-cyan-300 font-semibold">
+                <option value="claude-3-7-sonnet" className="bg-slate-900 text-slate-200">Claude 3.7 Sonnet (Hybrid)</option>
+                <option value="claude-3-5-sonnet" className="bg-slate-900 text-slate-200">Claude 3.5 Sonnet (Refactor)</option>
+                <option value="gpt-4o" className="bg-slate-900 text-slate-200">GPT-4o (OpenAI)</option>
+                <option value="deepseek-reasoner" className="bg-slate-900 text-slate-200">DeepSeek R1 (Reasoner)</option>
+                <option value="deepseek-chat" className="bg-slate-900 text-slate-200">DeepSeek V3 (Coding)</option>
+                <option value="gemini-2.0-flash" className="bg-slate-900 text-slate-200">Gemini 2.0 Flash (Fast)</option>
+                <option value="qwen-2.5-coder-32b" className="bg-slate-900 text-slate-200">Qwen 2.5 Coder 32B</option>
+              </optgroup>
+              <optgroup label="Local Ollama Models" className="bg-slate-900 text-emerald-300 font-semibold">
+                <option value="qwen2.5-coder:7b" className="bg-slate-900 text-slate-200">Qwen 2.5 Coder 7B (Local)</option>
+                <option value="deepseek-r1:7b" className="bg-slate-900 text-slate-200">DeepSeek R1 7B (Local)</option>
+                <option value="llama3.1:8b" className="bg-slate-900 text-slate-200">Llama 3.1 8B (Local)</option>
+              </optgroup>
+            </select>
           </div>
 
           {/* Doctor Preflight Button */}
