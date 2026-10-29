@@ -41,24 +41,24 @@ export default function ChatArea({
 
   const promptSuggestions = [
     {
-      title: 'Distributed Rate Limiter',
-      desc: 'Build a token-bucket rate limiter for FastAPI with Redis & race condition safeguards.',
+      title: 'Quantum Computing & Superposition',
+      desc: 'Explain quantum computing and superposition in simple terms with everyday analogies.',
+      prompt: 'Explain quantum computing and superposition in simple terms with everyday analogies.'
+    },
+    {
+      title: 'Python vs Rust Comparison',
+      desc: 'Compare Python and Rust for building high-throughput backend services and AI pipelines.',
+      prompt: 'Compare Python vs Rust: what are the pros and cons, and when should an engineering team choose one over the other?'
+    },
+    {
+      title: 'Distributed Rate Limiter in FastAPI',
+      desc: 'Build a production-grade token-bucket rate limiter with Redis and race-condition safeguards.',
       prompt: 'Implement a distributed token-bucket rate limiter middleware in FastAPI using Redis, with race-condition safeguards and unit tests.'
     },
     {
-      title: 'Memory Leak & Concurrency Audit',
-      desc: 'Audit asynchronous worker pools for memory leaks on Apple Silicon M2.',
-      prompt: 'Design an asynchronous task worker pool in Python that guarantees memory safety under 16GB RAM constraints and handles unexpected worker disconnects.'
-    },
-    {
-      title: 'JWT Auth with Token Rotation',
-      desc: 'Production-grade authentication system with refresh token hashing & revocation.',
-      prompt: 'Write a production-grade JWT authentication service with refresh token rotation, bcrypt password hashing, and role-based access control.'
-    },
-    {
-      title: 'Multi-Model Synthesis Explanation',
-      desc: 'Explain how SYNORA routes across Qwen, DeepSeek, and Llama sequentially.',
-      prompt: 'Explain the technical architecture of SYNORA AI: how does sequential multi-model orchestration with keep_alive=0 achieve consensus without exceeding 16GB VRAM?'
+      title: 'Creative Writing: Sci-Fi Short Story',
+      desc: 'Compose a compelling sci-fi short story about an autonomous AI operating beyond the solar system.',
+      prompt: 'Write an engaging, atmospheric sci-fi short story about an autonomous deep-space probe that discovers an anomalous signal.'
     }
   ];
 

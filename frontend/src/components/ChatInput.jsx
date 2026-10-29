@@ -62,7 +62,7 @@ export default function ChatInput({
               onChange={(e) => setSelectedPreset(e.target.value)}
               className="bg-slate-900 border border-slate-700/70 text-slate-200 text-xs rounded-lg px-2.5 py-1 focus:outline-none focus:border-purple-500"
             >
-              <option value="auto">Auto Orchestrator (Dynamic Classification)</option>
+              <option value="auto">Auto Orchestrator (Conversational & Multi-Model)</option>
               <option value="agent">⚡ Autonomous Agent Mode (Claw Code Tools & Execution)</option>
               <option value="coding">Manual Override: Coding Trio (Qwen + DeepSeek + Llama)</option>
               <option value="reasoning">Manual Override: Reasoning Focus (DeepSeek + Llama)</option>
@@ -94,7 +94,7 @@ export default function ChatInput({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask SYNORA AI anything (e.g. 'Build a distributed rate limiter in Python' or 'Analyze race conditions')..."
+            placeholder="Ask SYNORA AI anything (e.g. 'Explain quantum computing', 'Write a Python script', 'Why is the sky blue?')..."
             className="flex-1 bg-transparent text-slate-100 placeholder-slate-500 text-sm resize-none focus:outline-none max-h-48 leading-relaxed py-1 px-1"
             disabled={isGenerating}
           />

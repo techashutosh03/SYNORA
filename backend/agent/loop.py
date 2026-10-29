@@ -182,7 +182,8 @@ class AgentLoop:
             "2. Make surgical edits using edit_file whenever possible.",
             "3. Verify your work: run bash commands to build, lint, or run tests.",
             "4. If a command or test fails, analyze the error output and fix it autonomously.",
-            "5. When the user's objective is completely achieved, summarize what you did and provide final instructions."
+            "5. When the user's objective is completely achieved, summarize what you did and provide final instructions.",
+            "6. Conversational Versatility: You can have natural conversations, answer general questions across all domains, explain concepts, and provide advice just like ChatGPT, Claude, and Gemini. Only invoke tools when an action on the workspace or codebase is explicitly or implicitly needed."
         ]
         base = "\n".join(prompt_lines)
         context = context_loader.build_system_prompt_context()
@@ -256,17 +257,13 @@ class AgentLoop:
 
             if not inf_res.get("success"):
                 if settings.ALLOW_SIMULATION:
-                    clean_task = task.lower().strip()
-                    if clean_task in ("hi", "hello", "hey", "help", "who are you", "what can you do"):
-                        sim_resp = (
-                            "👋 Hello! I am **SYNORA AI**, powered by the Claw Code autonomous engineering harness "
-                            "and OmniRoute's 376 AI provider gateway.\n\n"
-                            "You can ask me to inspect code, write features, debug errors, run tests, or execute tasks. "
-                            "How can I help you today?"
-                        )
+                    from backend.core.conversational_engine import answer_general_query, detect_intent
+                    intent = detect_intent(task)
+                    if intent != "coding" and not any(k in task.lower() for k in ["git", "file", "test", "bash", "npm", "build", "debug", "directory", "dir"]):
+                        sim_resp = answer_general_query(task)
                         steps.append(AgentStep(
                             step_number=step_counter,
-                            model_id="synora-assistant",
+                            model_id="synora-conversational",
                             action_type="finish",
                             output=sim_resp,
                             duration_ms=turn_duration
@@ -441,15 +438,11 @@ class AgentLoop:
             if not inf_res.get("success"):
                 err_msg = inf_res.get("error", "Unknown inference error")
                 if settings.ALLOW_SIMULATION:
-                    clean_task = task.lower().strip()
-                    if clean_task in ("hi", "hello", "hey", "help", "who are you", "what can you do"):
-                        sim_resp = (
-                            "👋 Hello! I am **SYNORA AI**, powered by the Claw Code autonomous engineering harness "
-                            "and OmniRoute's 376 AI provider gateway.\n\n"
-                            "You can ask me to inspect code, write features, debug errors, run tests, or execute tasks. "
-                            "How can I help you today?"
-                        )
-                        yield f"data: {json.dumps({'event': 'thought', 'content': 'Responding to user in workspace mode.'})}\n\n"
+                    from backend.core.conversational_engine import answer_general_query, detect_intent
+                    intent = detect_intent(task)
+                    if intent != "coding" and not any(k in task.lower() for k in ["git", "file", "test", "bash", "npm", "build", "debug", "directory", "dir"]):
+                        sim_resp = answer_general_query(task)
+                        yield f"data: {json.dumps({'event': 'thought', 'content': 'Responding to inquiry with conversational intelligence.'})}\n\n"
                         yield f"data: {json.dumps({'event': 'complete', 'final_response': sim_resp, 'total_time_ms': (time.perf_counter() - start_time) * 1000})}\n\n"
                         return
 

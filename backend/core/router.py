@@ -331,11 +331,18 @@ class Router:
         if target_stages == 1:
             chosen = distinct_models[0]
             role = "synthesizer" if complexity == "simple" else "specialist"
+            if task_type == "coding":
+                s_name = "Direct Code Answer" if complexity == "simple" else "Specialist Implementation (Coding)"
+                sys_prompt = f"{context_guidance}You are SYNORA AI ({chosen}). Provide a clean, robust, and production-grade solution."
+            else:
+                s_name = "Direct Response" if complexity == "simple" else "Specialist Insight"
+                sys_prompt = f"{context_guidance}You are SYNORA AI ({chosen}), a helpful, conversational, and highly intelligent AI assistant. Answer the user's question clearly, thoroughly, and warmly just like ChatGPT, Claude, and Gemini."
+
             stages.append(StageConfig(
-                stage_name="Direct Answer" if complexity == "simple" else f"Specialist Implementation ({task_type.replace('_', ' ').title()})",
+                stage_name=s_name,
                 model_id=chosen,
                 role=role,
-                system_prompt=f"{context_guidance}You are SYNORA AI ({chosen}). Provide a direct, authoritative, and production-grade solution."
+                system_prompt=sys_prompt
             ))
             return OrchestrationPlan(
                 task_type=task_type,
@@ -346,18 +353,32 @@ class Router:
 
         if target_stages == 2:
             m1, m2 = distinct_models[0], distinct_models[1]
-            stages.append(StageConfig(
-                stage_name=f"Specialist Implementation ({task_type.replace('_', ' ').title()})",
-                model_id=m1,
-                role="specialist",
-                system_prompt=f"{context_guidance}You are the SYNORA Specialist ({m1}). Implement the requested solution with production-grade structure."
-            ))
-            stages.append(StageConfig(
-                stage_name="Review & Refinement",
-                model_id=m2,
-                role="reviewer",
-                system_prompt=f"You are the SYNORA Peer Reviewer ({m2}). Audit the output for correctness, security, edge cases, and deliver the final refined response."
-            ))
+            if task_type == "coding":
+                stages.append(StageConfig(
+                    stage_name=f"Specialist Implementation ({task_type.replace('_', ' ').title()})",
+                    model_id=m1,
+                    role="specialist",
+                    system_prompt=f"{context_guidance}You are the SYNORA Specialist ({m1}). Implement the requested solution with production-grade structure."
+                ))
+                stages.append(StageConfig(
+                    stage_name="Review & Refinement",
+                    model_id=m2,
+                    role="reviewer",
+                    system_prompt=f"You are the SYNORA Peer Reviewer ({m2}). Audit the output for correctness, security, edge cases, and deliver the final refined response."
+                ))
+            else:
+                stages.append(StageConfig(
+                    stage_name="Comprehensive Analysis",
+                    model_id=m1,
+                    role="specialist",
+                    system_prompt=f"{context_guidance}You are SYNORA AI ({m1}). Provide an articulate, detailed, and structured answer to the user's question."
+                ))
+                stages.append(StageConfig(
+                    stage_name="Review & Synthesis",
+                    model_id=m2,
+                    role="reviewer",
+                    system_prompt=f"You are SYNORA AI ({m2}). Review the initial response, enrich it with helpful nuance and context, and deliver the definitive final answer."
+                ))
             return OrchestrationPlan(
                 task_type=task_type,
                 complexity=complexity,
@@ -367,24 +388,44 @@ class Router:
 
         # target_stages == 3: Full collaboration
         m1, m2, m3 = distinct_models[0], distinct_models[1], distinct_models[2]
-        stages.append(StageConfig(
-            stage_name="Specialist Proposal",
-            model_id=m1,
-            role="specialist",
-            system_prompt=f"{context_guidance}You are the SYNORA Specialist ({m1}). Build a comprehensive, production-ready solution."
-        ))
-        stages.append(StageConfig(
-            stage_name="Logic & Security Audit",
-            model_id=m2,
-            role="reviewer",
-            system_prompt=f"You are the SYNORA Security & Logic Reviewer ({m2}). Audit the solution for vulnerabilities, architectural flaws, and edge cases."
-        ))
-        stages.append(StageConfig(
-            stage_name="Synthesis & Unification",
-            model_id=m3,
-            role="synthesizer",
-            system_prompt=f"You are the SYNORA Synthesis Engine ({m3}). Integrate the proposal and critique into ONE definitive, cohesive response."
-        ))
+        if task_type == "coding":
+            stages.append(StageConfig(
+                stage_name="Specialist Proposal",
+                model_id=m1,
+                role="specialist",
+                system_prompt=f"{context_guidance}You are the SYNORA Specialist ({m1}). Build a comprehensive, production-ready solution."
+            ))
+            stages.append(StageConfig(
+                stage_name="Logic & Security Audit",
+                model_id=m2,
+                role="reviewer",
+                system_prompt=f"You are the SYNORA Security & Logic Reviewer ({m2}). Audit the solution for vulnerabilities, architectural flaws, and edge cases."
+            ))
+            stages.append(StageConfig(
+                stage_name="Synthesis & Unification",
+                model_id=m3,
+                role="synthesizer",
+                system_prompt=f"You are the SYNORA Synthesis Engine ({m3}). Integrate the proposal and critique into ONE definitive, cohesive response."
+            ))
+        else:
+            stages.append(StageConfig(
+                stage_name="Initial Perspective",
+                model_id=m1,
+                role="specialist",
+                system_prompt=f"{context_guidance}You are SYNORA AI ({m1}). Formulate a comprehensive, intelligent answer to the user's inquiry."
+            ))
+            stages.append(StageConfig(
+                stage_name="Nuance & Fact-Check",
+                model_id=m2,
+                role="reviewer",
+                system_prompt=f"You are SYNORA Reviewer ({m2}). Verify factual accuracy, expand on subtle points, and ensure balanced perspective."
+            ))
+            stages.append(StageConfig(
+                stage_name="Unified Synthesis",
+                model_id=m3,
+                role="synthesizer",
+                system_prompt=f"You are the SYNORA Synthesis Engine ({m3}). Harmonize the perspectives into one cohesive, articulate, and engaging final response just like ChatGPT, Claude, and Gemini."
+            ))
         return OrchestrationPlan(
             task_type=task_type,
             complexity=complexity,
