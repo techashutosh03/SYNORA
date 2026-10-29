@@ -127,11 +127,11 @@ export default function App() {
   };
 
   // Send message with streaming
-  const handleSendMessage = async (userPrompt) => {
-    if (!userPrompt.trim() || isGenerating) return;
+  const handleSendMessage = async (userPrompt, attachments = []) => {
+    if ((!userPrompt?.trim() && (!attachments || attachments.length === 0)) || isGenerating) return;
 
-    // Add user message immediately
-    const userMsg = { role: 'user', content: userPrompt };
+    // Add user message immediately with attachments
+    const userMsg = { role: 'user', content: userPrompt, attachments: attachments || [] };
     setMessages(prev => [...prev, userMsg]);
     setIsGenerating(true);
     setStreamingText('');
@@ -223,6 +223,7 @@ export default function App() {
         sessionId: currentSessionId,
         customModels,
         simulate: isSim,
+        attachments: attachments || [],
         signal: abortController.signal,
         onRouting: (data) => {
           setStreamingStage({

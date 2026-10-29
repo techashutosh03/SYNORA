@@ -41,9 +41,9 @@ export default function ChatArea({
 
   const promptSuggestions = [
     {
-      title: 'Quantum Computing & Superposition',
-      desc: 'Explain quantum computing and superposition in simple terms with everyday analogies.',
-      prompt: 'Explain quantum computing and superposition in simple terms with everyday analogies.'
+      title: '⚡ Reality Check: AI Startups in 2026',
+      desc: 'Raw, unvarnished truth on market saturation, feature wrappers, and true unit economics.',
+      prompt: 'Give me the reality check on building an AI startup in 2026: what are the brutal truths and real failure modes?'
     },
     {
       title: 'Python vs Rust Comparison',
@@ -56,9 +56,9 @@ export default function ChatArea({
       prompt: 'Implement a distributed token-bucket rate limiter middleware in FastAPI using Redis, with race-condition safeguards and unit tests.'
     },
     {
-      title: 'Creative Writing: Sci-Fi Short Story',
-      desc: 'Compose a compelling sci-fi short story about an autonomous AI operating beyond the solar system.',
-      prompt: 'Write an engaging, atmospheric sci-fi short story about an autonomous deep-space probe that discovers an anomalous signal.'
+      title: 'Quantum Computing & Superposition',
+      desc: 'Explain quantum computing and superposition in simple terms with everyday analogies.',
+      prompt: 'Explain quantum computing and superposition in simple terms with everyday analogies.'
     }
   ];
 

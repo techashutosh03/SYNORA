@@ -1,5 +1,11 @@
 import unittest
-from backend.core.conversational_engine import detect_intent, answer_general_query
+from backend.core.conversational_engine import (
+    detect_intent, 
+    answer_general_query, 
+    is_reality_check_query, 
+    generate_reality_check,
+    handle_attachments_analysis
+)
 
 class TestConversationalEngine(unittest.TestCase):
     def test_greeting_intent(self):
@@ -28,6 +34,39 @@ class TestConversationalEngine(unittest.TestCase):
         resp = answer_general_query("Compare Python and Rust")
         self.assertIn("Python", resp)
         self.assertIn("Rust", resp)
+
+    def test_reality_check_detection(self):
+        self.assertTrue(is_reality_check_query("give me the reality check on tech jobs"))
+        self.assertTrue(is_reality_check_query("give me the reality cheak"))
+        self.assertTrue(is_reality_check_query("tell me the brutal truth about AI startups"))
+
+    def test_reality_check_generation(self):
+        resp = generate_reality_check("give me the reality check on building an AI startup")
+        self.assertIn("REALITY CHECK", resp)
+        self.assertIn("Raw Truth", resp)
+        self.assertIn("Playbook", resp)
+
+    def test_attachment_analysis_markdown(self):
+        att = [{
+            "name": "README.md",
+            "category": "markdown",
+            "size": 1024,
+            "text_content": "# Architecture Guide\n\n## Overview\nSystem docs."
+        }]
+        resp = handle_attachments_analysis("Analyze this file", att)
+        self.assertIn("README.md", resp)
+        self.assertIn("Architecture Guide", resp)
+
+    def test_attachment_analysis_video(self):
+        att = [{
+            "name": "screen_recording.mov",
+            "category": "video",
+            "type": "video/quicktime",
+            "size": 5242880
+        }]
+        resp = handle_attachments_analysis("Analyze this video", att)
+        self.assertIn("screen_recording.mov", resp)
+        self.assertIn("Video", resp)
 
 if __name__ == "__main__":
     unittest.main()

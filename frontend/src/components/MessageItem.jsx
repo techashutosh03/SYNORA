@@ -17,7 +17,13 @@ import {
   Sparkles,
   Terminal,
   Code2,
-  Layers
+  Layers,
+  Paperclip,
+  FileText,
+  FileCode,
+  Film,
+  Image as ImageIcon,
+  File
 } from 'lucide-react';
 
 /**
@@ -142,12 +148,59 @@ export default function MessageItem({ message }) {
   };
 
   if (isUser) {
+    const attachments = Array.isArray(message.attachments) ? message.attachments : [];
     return (
       <div className="flex justify-end gap-3 w-full my-4 animate-fade-in">
-        <div className="flex flex-col items-end max-w-[85%] md:max-w-[75%]">
-          <div className="px-4 py-3 rounded-2xl rounded-tr-sm bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-900/20 text-sm leading-relaxed whitespace-pre-wrap">
-            {contentText}
-          </div>
+        <div className="flex flex-col items-end max-w-[85%] md:max-w-[75%] space-y-2">
+          {/* Universal Attachments Display */}
+          {attachments.length > 0 && (
+            <div className="flex flex-col gap-2 w-full">
+              {attachments.map((att, idx) => (
+                <div key={idx} className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-2.5 text-xs text-slate-200 shadow-md">
+                  {att.category === 'image' && att.data_url ? (
+                    <div className="space-y-1.5">
+                      <img src={att.data_url} alt={att.name} className="max-h-56 rounded-lg object-contain border border-slate-700/80 mx-auto" />
+                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                        <span className="font-mono">{att.name}</span>
+                        <span>{Math.round((att.size || 0) / 1024)} KB</span>
+                      </div>
+                    </div>
+                  ) : att.category === 'video' && att.data_url ? (
+                    <div className="space-y-1.5">
+                      <video src={att.data_url} controls className="max-h-56 rounded-lg w-full bg-black/60 border border-slate-700/80" />
+                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                        <span className="font-mono flex items-center gap-1">
+                          <Film className="w-3 h-3 text-rose-400" />
+                          {att.name}
+                        </span>
+                        <span>{Math.round((att.size || 0) / 1024)} KB</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      {att.category === 'markdown' ? (
+                        <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                      ) : att.category === 'code' ? (
+                        <FileCode className="w-4 h-4 text-cyan-400 shrink-0" />
+                      ) : (
+                        <File className="w-4 h-4 text-purple-400 shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-mono text-[11px] truncate">{att.name}</div>
+                        <div className="text-[9px] text-slate-400">{Math.round((att.size || 0) / 1024)} KB • {att.category?.toUpperCase() || 'DOCUMENT'}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {contentText && (
+            <div className="px-4 py-3 rounded-2xl rounded-tr-sm bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-900/20 text-sm leading-relaxed whitespace-pre-wrap">
+              {contentText}
+            </div>
+          )}
         </div>
         <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-slate-300 shadow-md">
           <User className="w-4 h-4" />

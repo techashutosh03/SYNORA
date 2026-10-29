@@ -52,12 +52,22 @@ def validate_inference_mode(simulate: bool):
 
 # --- Request / Response Schemas ---
 
+class AttachmentItem(BaseModel):
+    name: str = Field(..., description="File name including extension")
+    type: Optional[str] = Field(default="application/octet-stream", description="MIME type")
+    size: Optional[int] = Field(default=0, description="File size in bytes")
+    category: Optional[str] = Field(default="document", description="image, video, markdown, code, document, other")
+    text_content: Optional[str] = Field(default=None, description="Extracted text or markdown content")
+    data_url: Optional[str] = Field(default=None, description="Base64 data URL for images/videos/binary")
+    content: Optional[str] = Field(default=None, description="Alias for content")
+
 class ChatRequest(BaseModel):
     prompt: Optional[str] = Field(default=None, description="User query or instruction")
     message: Optional[str] = Field(default=None, description="Alternative alias for prompt")
     session_id: Optional[str] = Field(default=None, description="Conversation session ID for multi-turn memory")
     custom_models: Optional[List[str]] = Field(default=None, description="Optional manual override of models to use")
     simulate: bool = Field(default=False, description="Inference mode: True for simulation, False for real inference")
+    attachments: Optional[List[AttachmentItem]] = Field(default_factory=list, description="Attached files of any format (.md, video, image, code, etc.)")
 
     def get_query(self) -> str:
         q = self.prompt or self.message
@@ -300,11 +310,13 @@ async def chat(request: ChatRequest):
                 ]
 
     # Step 3: Multi-Model Orchestration
+    raw_attachments = [a.model_dump() for a in request.attachments] if request.attachments else None
     try:
         orch_result: OrchestrationResult = await orchestrator.execute_plan(
             user_prompt=user_query,
             plan=plan,
-            simulate=is_simulated
+            simulate=is_simulated,
+            attachments=raw_attachments
         )
     except ModelUnavailableError as e:
         monitor.record_request(
@@ -517,11 +529,13 @@ async def chat_stream(request: ChatRequest):
             single_plan = plan.model_copy()
             single_plan.stages = [stage]
             
+            raw_attachments = [a.model_dump() for a in request.attachments] if request.attachments else None
             try:
                 single_res = await orchestrator.execute_plan(
                     user_prompt=user_query,
                     plan=single_plan,
-                    simulate=is_simulated
+                    simulate=is_simulated,
+                    attachments=raw_attachments
                 )
                 stage_res = single_res.stage_results[0]
             except ModelUnavailableError as e:

@@ -186,6 +186,17 @@ class Router:
                 is_follow_up = True
 
         # Score domains
+        from backend.core.conversational_engine import is_reality_check_query
+        if is_reality_check_query(prompt):
+            return {
+                "task_type": "reality_check",
+                "sub_domain": "unvarnished_truth",
+                "complexity": "medium",
+                "is_follow_up": is_follow_up,
+                "domain_scores": {"reality_check": 10.0},
+                "is_agentic_task": False
+            }
+
         domain_scores = {}
         for domain, profile in self.domain_profiles.items():
             kw_hits = len(words.intersection(profile["keywords"]))
@@ -366,6 +377,19 @@ class Router:
                     role="reviewer",
                     system_prompt=f"You are the SYNORA Peer Reviewer ({m2}). Audit the output for correctness, security, edge cases, and deliver the final refined response."
                 ))
+            elif task_type == "reality_check":
+                stages.append(StageConfig(
+                    stage_name="⚡ Ground Reality & Unvarnished Truth",
+                    model_id=m1,
+                    role="specialist",
+                    system_prompt=f"{context_guidance}You are SYNORA AI ({m1}) delivering a raw, unvarnished reality check. Cut through marketing hype, wishful thinking, and corporate platitudes. Deliver the empirical truth."
+                ))
+                stages.append(StageConfig(
+                    stage_name="🎯 Pragmatic Playbook & Verdict",
+                    model_id=m2,
+                    role="reviewer",
+                    system_prompt=f"You are SYNORA ({m2}). Audit the reality check for real-world friction points, failure modes, and provide an actionable, no-BS pragmatic playbook."
+                ))
             else:
                 stages.append(StageConfig(
                     stage_name="Comprehensive Analysis",
@@ -406,6 +430,25 @@ class Router:
                 model_id=m3,
                 role="synthesizer",
                 system_prompt=f"You are the SYNORA Synthesis Engine ({m3}). Integrate the proposal and critique into ONE definitive, cohesive response."
+            ))
+        elif task_type == "reality_check":
+            stages.append(StageConfig(
+                stage_name="⚡ Ground Reality (Raw Truth)",
+                model_id=m1,
+                role="specialist",
+                system_prompt=f"{context_guidance}You are SYNORA AI ({m1}) delivering a raw, unvarnished reality check. Strip away hype and wishful thinking."
+            ))
+            stages.append(StageConfig(
+                stage_name="⚠️ Friction & Failure Modes",
+                model_id=m2,
+                role="reviewer",
+                system_prompt=f"You are SYNORA ({m2}). Audit the reality check for real-world friction, failure modes, and practical vulnerabilities."
+            ))
+            stages.append(StageConfig(
+                stage_name="🎯 Pragmatic Playbook & Verdict",
+                model_id=m3,
+                role="synthesizer",
+                system_prompt=f"You are the SYNORA Synthesis Engine ({m3}). Deliver a definitive, actionable, unvarnished reality check verdict."
             ))
         else:
             stages.append(StageConfig(

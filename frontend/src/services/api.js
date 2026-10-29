@@ -120,6 +120,7 @@ export async function streamChatMessage({
   sessionId,
   customModels = null,
   simulate = false,
+  attachments = [],
   signal = null,
   onRouting,
   onStageStart,
@@ -134,6 +135,7 @@ export async function streamChatMessage({
     session_id: sessionId,
     custom_models: customModels,
     simulate: Boolean(simulate),
+    attachments: attachments || [],
   };
 
   try {

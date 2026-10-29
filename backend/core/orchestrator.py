@@ -219,10 +219,16 @@ class Orchestrator:
             return installed[0].id
         return None
 
-    def _generate_simulated_response(self, stage: StageConfig, user_prompt: str, stage_results: List[StageResult]) -> str:
+    def _generate_simulated_response(
+        self,
+        stage: StageConfig,
+        user_prompt: str,
+        stage_results: List[StageResult],
+        attachments: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
         """
-        Generates a realistic, highly articulate conversational or technical multi-model orchestration response
-        tailored to any question just like ChatGPT, Claude, and Gemini.
+        Generates a realistic, highly articulate conversational, reality-check, or technical multi-model orchestration response
+        tailored to any question, document, or media attachment.
         """
         role = stage.role.lower()
         model = stage.model_id
@@ -231,21 +237,23 @@ class Orchestrator:
         intent = detect_intent(user_prompt)
         is_code = intent == "coding" or any(k in user_prompt.lower() for k in ["code", "function", "class", "def ", "import ", "sql", "react", "fastapi", "bug", "implement", "script", "algorithm"])
 
-        # For conversational, explanations, creative, or general Q&A
-        if not is_code:
-            base_answer = answer_general_query(user_prompt)
+        # For reality check, attachments analysis, conversational, creative, or general Q&A
+        if intent == "reality_check" or (attachments and len(attachments) > 0) or not is_code:
+            base_answer = answer_general_query(user_prompt, attachments=attachments)
             if role == "specialist" or len(stage_results) == 0:
                 return base_answer
             elif role == "reviewer" or len(stage_results) == 1:
                 specialist_id = stage_results[0].model_id
+                if intent == "reality_check":
+                    return base_answer
                 return (
                     f"### Perspective Review & Fact-Check\n"
                     f"**Engine**: `{model}` (Reviewer & Synthesizer)\n"
                     f"**Target**: Analysis by `{specialist_id}`\n\n"
                     f"**Quality & Accuracy Assessment:**\n"
                     f"- **Completeness**: The core concepts addressing \"{user_prompt}\" are clearly and accurately articulated.\n"
-                    f"- **Clarity & Tone**: The explanation maintains a natural, helpful, and accessible conversational flow.\n"
-                    f"- **Additional Insight**: Remember to consider practical real-world context and continuous application when exploring this topic further.\n\n"
+                    f"- **Clarity & Tone**: The explanation maintains a natural, candid, and direct conversational flow.\n"
+                    f"- **Additional Insight**: Focus on practical implementation and verified empirical feedback.\n\n"
                     f"{base_answer}"
                 )
             else:
@@ -324,7 +332,8 @@ class Orchestrator:
         self,
         user_prompt: str,
         plan: OrchestrationPlan,
-        simulate: bool = False
+        simulate: bool = False,
+        attachments: Optional[List[Dict[str, Any]]] = None
     ) -> OrchestrationResult:
         """
         Executes an orchestration plan sequentially across models.
@@ -345,7 +354,7 @@ class Orchestrator:
 
             if use_simulation:
                 # Simulated response path - ONLY when simulate is True
-                content = self._generate_simulated_response(stage, user_prompt, stage_results)
+                content = self._generate_simulated_response(stage, user_prompt, stage_results, attachments=attachments)
                 stage_ms = 450.0 + (len(stage_results) * 120.0)
                 status = "simulated"
                 err = None
@@ -357,8 +366,22 @@ class Orchestrator:
                 if stage.system_prompt:
                     messages.append({"role": "system", "content": stage.system_prompt})
 
+                # Append attachment details to prompt context if present
+                effective_prompt = user_prompt
+                if attachments and len(attachments) > 0:
+                    att_summaries = []
+                    for a in attachments:
+                        a_name = a.get("name", "file")
+                        a_size = a.get("size", 0)
+                        a_text = a.get("text_content") or a.get("content") or ""
+                        if a_text:
+                            att_summaries.append(f"\n[Attached File: {a_name} ({a_size} bytes)]\n{a_text[:4000]}\n[End of File: {a_name}]")
+                        else:
+                            att_summaries.append(f"\n[Attached Media/Asset: {a_name} ({a.get('type', 'binary')}, {a_size} bytes)]")
+                    effective_prompt = f"{user_prompt}\n\n{''.join(att_summaries)}"
+
                 if len(stage_results) == 0:
-                    messages.append({"role": "user", "content": user_prompt})
+                    messages.append({"role": "user", "content": effective_prompt})
                 elif len(stage_results) == 1:
                     specialist_model = plan.stages[0].model_id
                     specialist_text = stage_results[0].response
