@@ -4,14 +4,15 @@ import {
   Activity, 
   Cpu, 
   Zap, 
+  RotateCw, 
+  CheckCircle2, 
   ShieldCheck, 
   Layers, 
   Clock, 
-  CheckCircle2, 
-  RotateCw,
-  HardDrive,
-  Info,
-  Terminal
+  Check, 
+  AlertCircle,
+  Terminal,
+  Code2
 } from 'lucide-react';
 
 export default function ModelActivityDrawer({
@@ -24,17 +25,31 @@ export default function ModelActivityDrawer({
 }) {
   if (!isOpen) return null;
 
-  const stages = activePipeline?.stages || latestTurn?.orchestration_stages || [
+  const defaultStages = [
     { stage_name: 'Specialist Proposal', model_id: 'qwen2.5-coder:7b', role: 'specialist', execution_time_ms: 1240, status: 'success' },
     { stage_name: 'Reviewer & Security Audit', model_id: 'deepseek-r1:7b', role: 'reviewer', execution_time_ms: 1520, status: 'success' },
     { stage_name: 'Unified Synthesis', model_id: 'llama3.1:8b', role: 'synthesizer', execution_time_ms: 890, status: 'success' }
   ];
 
-  const currentStageIndex = activePipeline?.currentStageIndex ?? -1;
-  const isRunning = activePipeline?.isRunning ?? false;
+  const stages = Array.isArray(activePipeline?.stages) && activePipeline.stages.length > 0
+    ? activePipeline.stages
+    : (Array.isArray(latestTurn?.orchestration_stages) && latestTurn.orchestration_stages.length > 0
+        ? latestTurn.orchestration_stages
+        : defaultStages);
 
-  const rssMb = latestTurn?.memory_rss_mb || metrics?.latest_rss_mb || 680;
+  const isRunning = Boolean(activePipeline?.isRunning);
+  const currentStageIndex = typeof activePipeline?.currentStageIndex === 'number' 
+    ? activePipeline.currentStageIndex 
+    : -1;
+
+  const rssMb = metrics?.latest_rss_mb || 1240.0;
   const memoryPct = Math.min(Math.round((rssMb / 16384) * 100), 100);
+
+  const clawTools = [
+    'bash', 'read_file', 'write_file', 'edit_file', 
+    'grep_search', 'glob_files', 'list_dir', 
+    'git_status', 'git_diff', 'git_commit', 'web_fetch', 'todo_write'
+  ];
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-96 bg-[#0B0F19] border-l border-slate-800 shadow-2xl flex flex-col animate-slide-up sm:animate-none">
@@ -83,7 +98,7 @@ export default function ModelActivityDrawer({
           </div>
 
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            Strict sequential execution: SYNORA passing <code className="text-purple-300">keep_alive=0</code> to unload each model immediately after its stage.
+            Strict sequential execution: SYNORA passing <code className="text-purple-300 font-mono">keep_alive=0</code> to unload each model immediately after its stage.
           </p>
         </div>
 
@@ -95,12 +110,12 @@ export default function ModelActivityDrawer({
               Claw Code Tool Arsenal
             </span>
             <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
-              7 Native Tools Active
+              12 Native Tools Ready
             </span>
           </div>
 
           <div className="flex flex-wrap gap-1.5 pt-1">
-            {['bash', 'read_file', 'write_file', 'edit_file', 'grep_search', 'glob_files', 'list_dir'].map(tool => (
+            {clawTools.map(tool => (
               <span key={tool} className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700/60">
                 {tool}
               </span>
@@ -150,19 +165,21 @@ export default function ModelActivityDrawer({
                         <span className="w-2 h-2 rounded-full bg-slate-600" />
                       )}
                       <span className="font-semibold text-slate-200">
-                        {stg.stage_name}
+                        {stg.stage_name || `Stage ${i + 1}`}
                       </span>
                     </div>
 
                     <span className="px-1.5 py-0.5 rounded text-[10px] uppercase font-mono bg-slate-800 text-slate-300">
-                      {stg.role}
+                      {stg.role || 'specialist'}
                     </span>
                   </div>
 
                   <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1 pl-5">
-                    <span className="font-mono text-purple-300">{stg.model_id}</span>
-                    {stg.execution_time_ms && (
-                      <span className="font-mono text-slate-500">{stg.execution_time_ms} ms</span>
+                    <span className="font-mono text-purple-300">{stg.model_id || 'Model'}</span>
+                    {stg.execution_time_ms != null && (
+                      <span className="font-mono text-slate-500">
+                        {typeof stg.execution_time_ms === 'number' ? Math.round(stg.execution_time_ms) : stg.execution_time_ms} ms
+                      </span>
                     )}
                   </div>
                 </div>
@@ -182,12 +199,12 @@ export default function ModelActivityDrawer({
             <div className="grid grid-cols-2 gap-2 pt-1 font-mono text-[11px]">
               <div className="p-2 rounded bg-slate-950/60 border border-slate-800">
                 <div className="text-slate-500 text-[10px]">Total Latency</div>
-                <div className="text-slate-200 font-bold">{latestTurn.total_time_ms || 0} ms</div>
+                <div className="text-slate-200 font-bold">{Math.round(latestTurn.total_time_ms || 0)} ms</div>
               </div>
 
               <div className="p-2 rounded bg-slate-950/60 border border-slate-800">
                 <div className="text-slate-500 text-[10px]">Routing Latency</div>
-                <div className="text-slate-200 font-bold">{latestTurn.routing_time_ms || 0.4} ms</div>
+                <div className="text-slate-200 font-bold">{Math.round(latestTurn.routing_time_ms || 0.4)} ms</div>
               </div>
 
               <div className="p-2 rounded bg-slate-950/60 border border-slate-800">

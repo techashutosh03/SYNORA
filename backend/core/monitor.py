@@ -161,6 +161,7 @@ class PerformanceMonitor:
                 "average_total_latency_ms": avg_total_ms
             },
             "per_model_metrics": self._model_stats,
+            "latest_rss_mb": self.get_current_memory_mb(),
             "system_resources": {
                 "process_memory_rss_mb": self.get_current_memory_mb(),
                 "storage": self.get_storage_status(),

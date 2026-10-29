@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import ClawStudio from './components/ClawStudio';
 import ModelActivityDrawer from './components/ModelActivityDrawer';
 import SettingsModal from './components/SettingsModal';
+import ErrorBoundary from './components/ErrorBoundary';
 import { 
   fetchHealth, 
   fetchSettings, 
@@ -38,9 +39,16 @@ export default function App() {
   const [latestTurn, setLatestTurn] = useState(null);
   const [selectedPreset, setSelectedPreset] = useState('auto');
 
+  const chatAbortControllerRef = useRef(null);
+
   // Load initial system data
   useEffect(() => {
     refreshAllData();
+    return () => {
+      if (chatAbortControllerRef.current) {
+        chatAbortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   const refreshAllData = async () => {
@@ -74,11 +82,11 @@ export default function App() {
         for (const t of res.turns) {
           formatted.push({
             role: 'user',
-            content: t.user_prompt
+            content: t.user_prompt || ''
           });
           formatted.push({
             role: 'assistant',
-            content: t.final_response,
+            content: t.final_response || '',
             models_used: t.models_used || [],
             total_time_ms: t.total_time_ms,
             memory_rss_mb: t.memory_rss_mb,
@@ -103,6 +111,7 @@ export default function App() {
     setStreamingStage(null);
     setLatestTurn(null);
     setActivePipeline(null);
+    setIsGenerating(false);
   };
 
   // Quick toggle for simulation mode
@@ -128,6 +137,75 @@ export default function App() {
     setStreamingText('');
     setStreamingStage({ stage_name: 'Routing & Multi-Factor Fitness Analysis...', model_id: 'Intelligent Router' });
 
+    const abortController = new AbortController();
+    chatAbortControllerRef.current = abortController;
+
+    // Direct autonomous agent execution if user selected 'agent' preset
+    if (selectedPreset === 'agent') {
+      try {
+        await streamAgentTask({
+          task: userPrompt,
+          modelId: 'qwen2.5-coder:7b',
+          workspaceRoot: '.',
+          signal: abortController.signal,
+          onStart: (d) => {
+            setStreamingStage({
+              stage_name: 'Claw Code Agent: Initializing Execution Loop',
+              model_id: d?.model || 'qwen2.5-coder:7b'
+            });
+          },
+          onThought: (d) => {
+            setStreamingText(prev => prev + '\n🧠 ' + (d?.content || ''));
+          },
+          onToolStart: (d) => {
+            setStreamingStage({
+              stage_name: `Claw Tool: ${d?.tool}`,
+              model_id: 'tool_executor'
+            });
+          },
+          onToolResult: (d) => {
+            const preview = typeof d?.output === 'string' ? d.output.slice(0, 150) : JSON.stringify(d?.output || '');
+            setStreamingText(prev => prev + `\n🛠️ [${d?.tool}] ${preview}`);
+          },
+          onComplete: (d) => {
+            const assistantMsg = {
+              role: 'assistant',
+              content: d?.final_response || 'Task completed successfully.',
+              models_used: ['qwen2.5-coder:7b'],
+              execution_mode: 'agent',
+              simulated: true,
+              error: false
+            };
+            setMessages(prev => [...prev, assistantMsg]);
+            setIsGenerating(false);
+            setStreamingText('');
+            setStreamingStage(null);
+            refreshAllData();
+          },
+          onError: (err) => {
+            setIsGenerating(false);
+            setStreamingText('');
+            setStreamingStage(null);
+            setActivePipeline(null);
+            const errMsg = typeof err === 'string' ? err : (err?.message || JSON.stringify(err, null, 2));
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: `⚠️ Agent execution notice: ${errMsg}`,
+              error: true
+            }]);
+          }
+        });
+      } catch (err) {
+        setIsGenerating(false);
+        setStreamingText('');
+        setStreamingStage(null);
+        setActivePipeline(null);
+      } finally {
+        chatAbortControllerRef.current = null;
+      }
+      return;
+    }
+
     let customModels = null;
     if (selectedPreset === 'coding') {
       customModels = ['qwen2.5-coder:7b', 'deepseek-r1:7b', 'llama3.1:8b'];
@@ -139,106 +217,20 @@ export default function App() {
     let currentStages = [];
     const isSim = Boolean(settings?.allow_simulation);
 
-    if (selectedPreset === 'agent') {
-      setStreamingStage({ stage_name: '⚡ Claw Agent Engine: Analyzing & Planning...', model_id: 'qwen2.5-coder:7b' });
-      setActivePipeline({
-        stages: [
-          { stage_name: 'Agent Reason & Tool Planning', model_id: 'qwen2.5-coder:7b', role: 'agent', status: 'running' }
-        ],
-        currentStageIndex: 0,
-        isRunning: true
-      });
-
-      const agentStages = [];
-      try {
-        await streamAgentTask({
-          task: userPrompt,
-          modelId: 'qwen2.5-coder:7b',
-          onStart: (data) => {
-            setStreamingStage({ stage_name: 'Agent Loop Active', model_id: data.model });
-          },
-          onThought: (data) => {
-            accumulatedText += `\n\n> 💭 **Thought:**\n${data.content}\n`;
-            setStreamingText(accumulatedText);
-          },
-          onToolStart: (data) => {
-            setStreamingStage({ stage_name: `Executing Tool: ${data.tool}`, model_id: 'Claw Engine' });
-            accumulatedText += `\n\n🛠️ **Tool Call:** \`${data.tool}\` \`${JSON.stringify(data.arguments)}\`\n`;
-            setStreamingText(accumulatedText);
-            agentStages.push({
-              stage_name: `Tool: ${data.tool}`,
-              model_id: 'Claw Engine',
-              role: 'executor',
-              status: 'running'
-            });
-            setActivePipeline({ stages: agentStages, currentStageIndex: agentStages.length - 1, isRunning: true });
-          },
-          onToolResult: (data) => {
-            accumulatedText += `\n\`\`\`text\n${data.output}\n\`\`\`\n`;
-            setStreamingText(accumulatedText);
-            if (agentStages.length > 0) {
-              agentStages[agentStages.length - 1].status = data.success ? 'success' : 'error';
-              agentStages[agentStages.length - 1].execution_time_ms = data.duration_ms;
-            }
-          },
-          onComplete: (data) => {
-            const assistantMsg = {
-              role: 'assistant',
-              content: data.final_response || accumulatedText,
-              models_used: ['qwen2.5-coder:7b'],
-              total_time_ms: Math.round(data.total_time_ms || 1500),
-              routing_time_ms: 0.8,
-              memory_rss_mb: metrics?.latest_rss_mb || 680,
-              orchestration_stages: agentStages.length > 0 ? agentStages : [
-                { stage_name: 'Autonomous Agent Execution', model_id: 'qwen2.5-coder:7b', role: 'specialist', status: 'success' }
-              ],
-              execution_mode: 'real',
-              simulated: false,
-              is_simulated: false,
-              error: false
-            };
-            setMessages(prev => [...prev, assistantMsg]);
-            setLatestTurn(assistantMsg);
-            setIsGenerating(false);
-            setStreamingText('');
-            setStreamingStage(null);
-            setActivePipeline(null);
-            refreshAllData();
-          },
-          onError: (err) => {
-            setIsGenerating(false);
-            setStreamingText('');
-            setStreamingStage(null);
-            setActivePipeline(null);
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              content: `⚠️ Agent execution error: ${err?.message || err}`,
-              error: true
-            }]);
-          }
-        });
-      } catch (err) {
-        setIsGenerating(false);
-        setStreamingText('');
-        setStreamingStage(null);
-        setActivePipeline(null);
-      }
-      return;
-    }
-
     try {
       await streamChatMessage({
         prompt: userPrompt,
         sessionId: currentSessionId,
         customModels,
         simulate: isSim,
+        signal: abortController.signal,
         onRouting: (data) => {
           setStreamingStage({
-            stage_name: `Routing: ${data.task_type.toUpperCase()} (${data.complexity})`,
+            stage_name: `Routing: ${String(data.task_type || 'GENERAL').toUpperCase()} (${data.complexity || 'standard'})`,
             model_id: 'Router'
           });
           setActivePipeline({
-            stages: data.stages,
+            stages: data.stages || [],
             currentStageIndex: 0,
             isRunning: true
           });
@@ -300,15 +292,15 @@ export default function App() {
           });
         },
         onError: (err) => {
-          console.warn('Inference error received from backend:', err);
-          const errorTitle = err?.error || err?.detail?.error || 'Model Unavailable';
+          console.warn('Inference notice from backend:', err);
+          const errorTitle = err?.error || err?.detail?.error || 'Model Notice';
           const modelId = err?.model || err?.detail?.model;
           const installCmd = err?.install_command || err?.detail?.install_command;
           const suggestedInstall = err?.suggested_install || err?.detail?.suggested_install;
-          let errorMessage = err?.message || err?.detail?.message;
+          let errorMessage = typeof err === 'string' ? err : (err?.message || err?.detail?.message);
 
           if (!errorMessage || typeof errorMessage !== 'string') {
-            errorMessage = 'SYNORA cannot perform real inference because no compatible AI models are installed.';
+            errorMessage = 'Ollama local models are offline or loading. Enable "Sim: ON" in the header to run in zero-install mode.';
           }
 
           if (suggestedInstall && Array.isArray(suggestedInstall) && suggestedInstall.length > 0) {
@@ -340,10 +332,15 @@ export default function App() {
       setStreamingText('');
       setStreamingStage(null);
       setActivePipeline(prev => ({ ...prev, isRunning: false }));
+    } finally {
+      chatAbortControllerRef.current = null;
     }
   };
 
   const handleStopGeneration = () => {
+    if (chatAbortControllerRef.current) {
+      chatAbortControllerRef.current.abort();
+    }
     setIsGenerating(false);
     setStreamingStage(null);
     if (streamingText) {
@@ -359,77 +356,79 @@ export default function App() {
   };
 
   return (
-    <div className="h-dvh w-full flex overflow-hidden bg-[#07090E] text-slate-100 font-sans relative">
-      {/* Background ambient radiant glows */}
-      <div className="radial-glow glow-violet w-[500px] h-[500px] -top-40 -left-40" />
-      <div className="radial-glow glow-cyan w-[600px] h-[600px] -bottom-60 -right-60" />
+    <ErrorBoundary onReset={handleNewChat}>
+      <div className="h-dvh w-full flex overflow-hidden bg-[#07090E] text-slate-100 font-sans relative">
+        {/* Background ambient radiant glows */}
+        <div className="radial-glow glow-violet w-[500px] h-[500px] -top-40 -left-40 pointer-events-none" />
+        <div className="radial-glow glow-cyan w-[600px] h-[600px] -bottom-60 -right-60 pointer-events-none" />
 
-      {/* Left Sidebar */}
-      <Sidebar
-        isOpen={sidebarOpen}
-        conversations={conversations}
-        currentSessionId={currentSessionId}
-        onSelectSession={handleSelectSession}
-        onNewChat={handleNewChat}
-        latestMetrics={metrics}
-        health={health}
-      />
-
-      {/* Main Content Area */}
-      <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden relative z-10">
-        <Header
-          sidebarOpen={sidebarOpen}
-          setSidebarOpen={setSidebarOpen}
-          activityOpen={activityOpen}
-          setActivityOpen={setActivityOpen}
-          onOpenSettings={() => setSettingsOpen(true)}
-          health={health}
-          settings={settings}
-          onToggleSimulation={handleToggleSimulation}
+        {/* Left Sidebar */}
+        <Sidebar
+          isOpen={sidebarOpen}
+          conversations={conversations}
+          currentSessionId={currentSessionId}
+          onSelectSession={handleSelectSession}
+          onNewChat={handleNewChat}
           latestMetrics={metrics}
-          currentView={currentView}
-          setCurrentView={setCurrentView}
+          health={health}
         />
 
-        {currentView === 'claw' ? (
-          <ClawStudio health={health} settings={settings} />
-        ) : (
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            <ChatArea
-              messages={messages}
-              isGenerating={isGenerating}
-              streamingStage={streamingStage}
-              streamingText={streamingText}
-              onSelectPrompt={handleSendMessage}
-              onSendMessage={handleSendMessage}
-              onStopGeneration={handleStopGeneration}
-              isSimulated={settings?.allow_simulation}
-              onToggleSimulation={handleToggleSimulation}
-              selectedPreset={selectedPreset}
-              setSelectedPreset={setSelectedPreset}
-            />
-          </div>
-        )}
-      </main>
+        {/* Main Content Area */}
+        <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden relative z-10">
+          <Header
+            sidebarOpen={sidebarOpen}
+            setSidebarOpen={setSidebarOpen}
+            activityOpen={activityOpen}
+            setActivityOpen={setActivityOpen}
+            onOpenSettings={() => setSettingsOpen(true)}
+            health={health}
+            settings={settings}
+            onToggleSimulation={handleToggleSimulation}
+            latestMetrics={metrics}
+            currentView={currentView}
+            setCurrentView={setCurrentView}
+          />
 
-      {/* Right Drawer: Model Activity */}
-      <ModelActivityDrawer
-        isOpen={activityOpen}
-        onClose={() => setActivityOpen(false)}
-        activePipeline={activePipeline}
-        latestTurn={latestTurn}
-        metrics={metrics}
-        health={health}
-      />
+          {currentView === 'claw' ? (
+            <ClawStudio health={health} settings={settings} />
+          ) : (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <ChatArea
+                messages={messages}
+                isGenerating={isGenerating}
+                streamingStage={streamingStage}
+                streamingText={streamingText}
+                onSelectPrompt={handleSendMessage}
+                onSendMessage={handleSendMessage}
+                onStopGeneration={handleStopGeneration}
+                isSimulated={settings?.allow_simulation}
+                onToggleSimulation={handleToggleSimulation}
+                selectedPreset={selectedPreset}
+                setSelectedPreset={setSelectedPreset}
+              />
+            </div>
+          )}
+        </main>
 
-      {/* Settings Modal */}
-      <SettingsModal
-        isOpen={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        settings={settings}
-        onSettingsUpdated={refreshAllData}
-        health={health}
-      />
-    </div>
+        {/* Right Drawer: Model Activity */}
+        <ModelActivityDrawer
+          isOpen={activityOpen}
+          onClose={() => setActivityOpen(false)}
+          activePipeline={activePipeline}
+          latestTurn={latestTurn}
+          metrics={metrics}
+          health={health}
+        />
+
+        {/* Settings Modal */}
+        <SettingsModal
+          isOpen={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          settings={settings}
+          onSettingsUpdated={refreshAllData}
+          health={health}
+        />
+      </div>
+    </ErrorBoundary>
   );
 }

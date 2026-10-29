@@ -20,7 +20,14 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
-  Code2
+  Code2,
+  Trash2,
+  Check,
+  Search,
+  Zap,
+  HelpCircle,
+  Clock,
+  ArrowRight
 } from 'lucide-react';
 import { 
   streamAgentTask, 
@@ -32,6 +39,19 @@ import {
   updateClawPermissions,
   executeDirectTool
 } from '../services/api';
+
+/**
+ * Safely stringify any value to prevent React child rendering errors
+ */
+function safeString(val) {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string') return val;
+  try {
+    return JSON.stringify(val, null, 2);
+  } catch (e) {
+    return String(val);
+  }
+}
 
 export default function ClawStudio({ health, settings }) {
   const [workspacePath, setWorkspacePath] = useState('.');
@@ -54,12 +74,20 @@ export default function ClawStudio({ health, settings }) {
 
   const [doctorReport, setDoctorReport] = useState(null);
   const [doctorLoading, setDoctorLoading] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
 
   const eventsEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   useEffect(() => {
     loadWorkspaceStatus();
+    return () => {
+      // Abort any pending stream on unmount
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -72,8 +100,8 @@ export default function ClawStudio({ health, settings }) {
       if (data) {
         setWorkspaceInfo(data);
         setWorkspacePath(data.workspace_root || '.');
-        setGitStatus(data.git_status || 'Clean');
-        setMemoryFiles(data.memory_files || []);
+        setGitStatus(safeString(data.git_status || 'Clean'));
+        setMemoryFiles(Array.isArray(data.memory_files) ? data.memory_files : []);
         setPermissionMode(data.permission_mode || 'autonomous');
       }
     } catch (err) {
@@ -104,7 +132,8 @@ export default function ClawStudio({ health, settings }) {
     setDoctorLoading(true);
     try {
       const res = await fetchClawDoctor();
-      setDoctorReport(res.output);
+      const outputText = safeString(res?.output || 'Doctor preflight finished.');
+      setDoctorReport(outputText);
       setActiveTab('stream');
       setStreamEvents(prev => [
         ...prev,
@@ -112,8 +141,8 @@ export default function ClawStudio({ health, settings }) {
           id: Date.now(),
           type: 'tool_result',
           tool: '/doctor',
-          output: res.output,
-          success: res.success,
+          output: outputText,
+          success: Boolean(res?.success),
           duration_ms: 120
         }
       ]);
@@ -129,7 +158,7 @@ export default function ClawStudio({ health, settings }) {
     setActiveTab('diff');
     try {
       const res = await fetchClawDiff();
-      setGitDiff(res.output || res.error || 'No uncommitted diffs.');
+      setGitDiff(safeString(res?.output || res?.error || 'No uncommitted diffs found. Working tree is clean.'));
     } catch (err) {
       setGitDiff(`Error fetching diff: ${err.message}`);
     } finally {
@@ -137,8 +166,8 @@ export default function ClawStudio({ health, settings }) {
     }
   };
 
-  const handleRunSlash = async (cmd) => {
-    if (isExecuting) return;
+  // Internal executor for slash commands
+  const runSlashCommandInternal = async (cmd) => {
     setIsExecuting(true);
     setStreamEvents(prev => [
       ...prev,
@@ -153,8 +182,8 @@ export default function ClawStudio({ health, settings }) {
           id: Date.now() + 1,
           type: 'tool_result',
           tool: cmd,
-          output: res.output,
-          success: res.success,
+          output: safeString(res?.output || 'Done.'),
+          success: Boolean(res?.success),
           duration_ms: 80
         }
       ]);
@@ -165,7 +194,7 @@ export default function ClawStudio({ health, settings }) {
         {
           id: Date.now() + 1,
           type: 'error',
-          output: `Command failed: ${err.message}`
+          output: `Command failed: ${err?.message || safeString(err)}`
         }
       ]);
     } finally {
@@ -173,45 +202,54 @@ export default function ClawStudio({ health, settings }) {
     }
   };
 
+  const handleRunSlash = (cmd) => {
+    if (isExecuting) return;
+    runSlashCommandInternal(cmd);
+  };
+
   const handleExecuteTask = async (taskText) => {
     const textToRun = (taskText || prompt).trim();
     if (!textToRun || isExecuting) return;
 
     setPrompt('');
-    setIsExecuting(true);
 
-    // If starts with /, dispatch slash command
+    // If starts with /, dispatch slash command cleanly
     if (textToRun.startsWith('/')) {
-      await handleRunSlash(textToRun);
+      await runSlashCommandInternal(textToRun);
       return;
     }
 
+    setIsExecuting(true);
     setStreamEvents(prev => [
       ...prev,
       { id: Date.now(), type: 'user_task', content: textToRun }
     ]);
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     try {
       await streamAgentTask({
         task: textToRun,
         modelId: 'qwen2.5-coder:7b',
         workspaceRoot: workspacePath,
+        signal: abortController.signal,
         onStart: (d) => {
           setStreamEvents(prev => [
             ...prev,
-            { id: Date.now(), type: 'start', model: d.model }
+            { id: Date.now(), type: 'start', model: safeString(d?.model || 'qwen2.5-coder:7b') }
           ]);
         },
         onThought: (d) => {
           setStreamEvents(prev => [
             ...prev,
-            { id: Date.now(), type: 'thought', content: d.content }
+            { id: Date.now(), type: 'thought', content: safeString(d?.content) }
           ]);
         },
         onToolStart: (d) => {
           setStreamEvents(prev => [
             ...prev,
-            { id: Date.now(), type: 'tool_start', tool: d.tool, arguments: d.arguments }
+            { id: Date.now(), type: 'tool_start', tool: safeString(d?.tool), arguments: d?.arguments }
           ]);
         },
         onToolResult: (d) => {
@@ -220,10 +258,10 @@ export default function ClawStudio({ health, settings }) {
             {
               id: Date.now(),
               type: 'tool_result',
-              tool: d.tool,
-              output: d.output,
-              success: d.success,
-              duration_ms: d.duration_ms
+              tool: safeString(d?.tool),
+              output: safeString(d?.output),
+              success: Boolean(d?.success),
+              duration_ms: typeof d?.duration_ms === 'number' ? d.duration_ms : 0
             }
           ]);
         },
@@ -233,28 +271,45 @@ export default function ClawStudio({ health, settings }) {
             {
               id: Date.now(),
               type: 'complete',
-              final_response: d.final_response,
-              total_time_ms: d.total_time_ms
+              final_response: safeString(d?.final_response),
+              total_time_ms: typeof d?.total_time_ms === 'number' ? d.total_time_ms : 0
             }
           ]);
           setIsExecuting(false);
           loadWorkspaceStatus();
         },
         onError: (d) => {
+          const errMsg = d?.message ? safeString(d.message) : safeString(d);
           setStreamEvents(prev => [
             ...prev,
-            { id: Date.now(), type: 'error', output: d.message || JSON.stringify(d) }
+            { id: Date.now(), type: 'error', output: errMsg }
           ]);
           setIsExecuting(false);
         }
       });
     } catch (err) {
-      setStreamEvents(prev => [
-        ...prev,
-        { id: Date.now(), type: 'error', output: err.message }
-      ]);
+      if (err.name === 'AbortError') {
+        setStreamEvents(prev => [
+          ...prev,
+          { id: Date.now(), type: 'error', output: 'Task execution stopped by user.' }
+        ]);
+      } else {
+        setStreamEvents(prev => [
+          ...prev,
+          { id: Date.now(), type: 'error', output: err?.message || safeString(err) }
+        ]);
+      }
       setIsExecuting(false);
+    } finally {
+      abortControllerRef.current = null;
     }
+  };
+
+  const handleStopExecution = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    setIsExecuting(false);
   };
 
   const handleRunDirect = async () => {
@@ -262,7 +317,7 @@ export default function ClawStudio({ health, settings }) {
     setDirectLoading(true);
     try {
       const res = await executeDirectTool('bash', { command: directCommand.trim() });
-      setDirectOutput(res.output || res.error || 'Done.');
+      setDirectOutput(safeString(res?.output || res?.error || 'Command executed cleanly.'));
     } catch (err) {
       setDirectOutput(`Execution failed: ${err.message}`);
     } finally {
@@ -270,8 +325,20 @@ export default function ClawStudio({ health, settings }) {
     }
   };
 
+  const handleClearStream = () => {
+    setStreamEvents([]);
+  };
+
+  const handleCopyText = (id, text) => {
+    navigator.clipboard.writeText(safeString(text));
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const gitBranchDisplay = String(gitStatus || '').split('\n')[0] || 'Clean';
+
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-[#07090E] text-slate-100 overflow-hidden relative">
       {/* 1. WORKSPACE & ENVIRONMENT TOP BAR */}
       <div className="px-4 py-2.5 bg-slate-900/90 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0 shadow-lg">
         {/* Workspace Path Input */}
@@ -282,7 +349,7 @@ export default function ClawStudio({ health, settings }) {
             type="text"
             value={workspacePath}
             onChange={(e) => setWorkspacePath(e.target.value)}
-            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-200 font-mono text-xs focus:outline-none focus:border-purple-500"
+            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-slate-200 font-mono text-xs focus:outline-none focus:border-purple-500 transition-colors"
             placeholder="/path/to/project"
           />
           <button
@@ -298,7 +365,7 @@ export default function ClawStudio({ health, settings }) {
           {/* Git Branch Badge */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800/70 border border-slate-700/60 rounded-md font-mono text-[11px] text-slate-300">
             <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="truncate max-w-[140px]">{gitStatus.split('\n')[0] || 'Clean'}</span>
+            <span className="truncate max-w-[140px]">{gitBranchDisplay}</span>
           </div>
 
           {/* Security Mode Selector */}
@@ -351,10 +418,10 @@ export default function ClawStudio({ health, settings }) {
         </div>
       </div>
 
-      {/* 2. SLASH COMMAND QUICK ACTION BAR */}
+      {/* 2. SLASH COMMAND QUICK ACTION BAR & TAB SELECTORS */}
       <div className="px-4 py-2 bg-slate-900/40 border-b border-slate-800/60 flex items-center justify-between gap-2 overflow-x-auto text-xs shrink-0">
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-[11px] text-slate-500 font-mono">Slash Commands:</span>
+          <span className="text-[11px] text-slate-500 font-mono">Quick Actions:</span>
           {[
             { label: '🩺 /doctor', cmd: '/doctor' },
             { label: '🔍 /review', cmd: '/review' },
@@ -369,7 +436,7 @@ export default function ClawStudio({ health, settings }) {
               key={item.cmd}
               onClick={() => handleRunSlash(item.cmd)}
               disabled={isExecuting}
-              className="px-2 py-0.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/60 rounded font-mono text-[11px] transition-colors whitespace-nowrap"
+              className="px-2 py-0.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/60 rounded font-mono text-[11px] transition-colors whitespace-nowrap active:scale-95 disabled:opacity-50"
             >
               {item.label}
             </button>
@@ -386,7 +453,7 @@ export default function ClawStudio({ health, settings }) {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Execution Stream
+            Live Stream {streamEvents.length > 0 && `(${streamEvents.length})`}
           </button>
           <button
             onClick={handleLoadDiff}
@@ -421,156 +488,301 @@ export default function ClawStudio({ health, settings }) {
         </div>
       </div>
 
-      {/* 3. MAIN PANE */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
+      {/* 3. MAIN WORKSPACE VIEWPORT */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 space-y-4">
         {/* TAB 1: EXECUTION STREAM */}
         {activeTab === 'stream' && (
-          <div className="max-w-4xl mx-auto space-y-4">
-            {streamEvents.length === 0 ? (
-              <div className="text-center py-16 px-4">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-600/30 to-cyan-500/30 border border-purple-500/30 flex items-center justify-center mx-auto mb-4 shadow-xl">
-                  <Terminal className="w-8 h-8 text-cyan-400" />
+          <div className="max-w-4xl mx-auto space-y-3">
+            {/* Stream Header Action Bar */}
+            {streamEvents.length > 0 && (
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-xs text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-slate-300">Active Execution Trace</span>
+                  {isExecuting && (
+                    <span className="flex items-center gap-1.5 text-cyan-400">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                      Running...
+                    </span>
+                  )}
                 </div>
-                <h3 className="text-lg font-bold text-slate-100 mb-2">Claw Code Autonomous Studio</h3>
-                <p className="text-sm text-slate-400 max-w-lg mx-auto mb-6 leading-relaxed">
-                  Combine Claw Code's native filesystem and shell tool engine with SYNORA's multi-model intelligence.
-                  Give the agent a task (e.g. <span className="text-purple-300 font-mono">"Write unit tests for router.py"</span> or <span className="text-purple-300 font-mono">"Fix race conditions in cache"</span>), or run slash commands like <span className="text-cyan-300 font-mono">/doctor</span>.
-                </p>
-                <div className="flex flex-wrap justify-center gap-2 max-w-md mx-auto">
+                <button
+                  onClick={handleClearStream}
+                  className="flex items-center gap-1 px-2 py-1 text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 rounded transition-colors"
+                  title="Clear feed"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear Feed</span>
+                </button>
+              </div>
+            )}
+
+            {streamEvents.length === 0 ? (
+              /* EMPTY STATE HERO */
+              <div className="py-8 space-y-8 animate-fade-in">
+                <div className="text-center space-y-3">
+                  <div className="inline-flex p-3 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-400 mb-1">
+                    <Terminal className="w-8 h-8 text-cyan-400" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-white tracking-tight">
+                    Claw Code Studio
+                  </h3>
+                  <p className="text-slate-400 text-xs md:text-sm max-w-lg mx-auto leading-relaxed">
+                    Autonomous software engineering harness powered by SYNORA multi-model intelligence. Performs surgical code edits, git operations, and terminal tasks with full verification.
+                  </p>
+                </div>
+
+                {/* 4 Quick Start Action Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 max-w-2xl mx-auto">
                   <button
-                    onClick={() => handleRunSlash('/doctor')}
-                    className="px-3 py-1.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-300 hover:border-purple-500/60 transition-colors"
+                    onClick={handleRunDoctor}
+                    className="p-4 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500/40 text-left transition-all group flex flex-col justify-between space-y-2 shadow-sm"
                   >
-                    🩺 Run Preflight Doctor
+                    <div>
+                      <div className="flex items-center gap-2 font-semibold text-cyan-400 text-xs">
+                        <Stethoscope className="w-4 h-4" />
+                        <span>1. Run Diagnostic Doctor</span>
+                      </div>
+                      <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">
+                        Verify Ollama connectivity, model readiness, git repository health, and permissions.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-medium group-hover:translate-x-1 transition-transform">
+                      <span>Execute /doctor</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </div>
                   </button>
+
                   <button
-                    onClick={() => handleRunSlash('/status')}
-                    className="px-3 py-1.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-300 hover:border-purple-500/60 transition-colors"
+                    onClick={() => handleRunSlash('/review')}
+                    className="p-4 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-purple-500/40 text-left transition-all group flex flex-col justify-between space-y-2 shadow-sm"
                   >
-                    📊 Check Workspace Status
+                    <div>
+                      <div className="flex items-center gap-2 font-semibold text-purple-400 text-xs">
+                        <Sparkles className="w-4 h-4" />
+                        <span>2. Autonomous Code Review</span>
+                      </div>
+                      <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">
+                        Perform a surgical security and logic review of uncommitted git diffs across the project.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] text-purple-400 font-medium group-hover:translate-x-1 transition-transform">
+                      <span>Execute /review</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </div>
                   </button>
+
+                  <button
+                    onClick={handleLoadDiff}
+                    className="p-4 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-indigo-500/40 text-left transition-all group flex flex-col justify-between space-y-2 shadow-sm"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 font-semibold text-indigo-400 text-xs">
+                        <GitBranch className="w-4 h-4" />
+                        <span>3. Inspect Git Diff</span>
+                      </div>
+                      <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">
+                        View modified files and syntax changes in real-time before generating semantic commits.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] text-indigo-400 font-medium group-hover:translate-x-1 transition-transform">
+                      <span>View Diff</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </div>
+                  </button>
+
                   <button
                     onClick={() => handleRunSlash('/tools')}
-                    className="px-3 py-1.5 bg-slate-900 border border-slate-700/80 rounded-lg text-xs text-slate-300 hover:border-purple-500/60 transition-colors"
+                    className="p-4 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-left transition-all group flex flex-col justify-between space-y-2 shadow-sm"
                   >
-                    🛠️ Explore 12+ Tools
+                    <div>
+                      <div className="flex items-center gap-2 font-semibold text-emerald-400 text-xs">
+                        <FileCode className="w-4 h-4" />
+                        <span>4. Explore 12+ Tools</span>
+                      </div>
+                      <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">
+                        Inspect registered native tools for bash, filesystem editing, grep search, and git operations.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium group-hover:translate-x-1 transition-transform">
+                      <span>List Tools</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </div>
                   </button>
+                </div>
+
+                {/* Example Prompts */}
+                <div className="max-w-2xl mx-auto pt-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Try a Task</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      'Audit repository git status and modified files',
+                      'Search for all TODO items across the backend codebase',
+                      'Check project memory files and guidelines',
+                      'Run test suite and verify system health'
+                    ].map((example, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleExecuteTask(example)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-purple-500/50 text-xs transition-colors"
+                      >
+                        {example}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             ) : (
-              streamEvents.map((ev) => (
-                <div key={ev.id} className="animate-fadeIn">
-                  {/* User Task */}
-                  {ev.type === 'user_task' && (
-                    <div className="flex justify-end mb-2">
-                      <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-gradient-to-r from-purple-600/40 via-indigo-600/40 to-cyan-600/40 border border-purple-500/40 p-3.5 text-sm text-slate-100 shadow-md">
-                        <div className="font-semibold text-xs text-purple-300 mb-1 flex items-center gap-1.5">
-                          <Terminal className="w-3.5 h-3.5" />
-                          <span>Task Prompt</span>
+              /* EVENT LIST */
+              streamEvents.map((ev) => {
+                const isCopied = copiedId === ev.id;
+                const outputText = safeString(ev.output);
+
+                return (
+                  <div key={ev.id} className="animate-fadeIn space-y-2">
+                    {/* User Task */}
+                    {ev.type === 'user_task' && (
+                      <div className="flex justify-end mb-2">
+                        <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-gradient-to-r from-purple-600/40 via-indigo-600/40 to-cyan-600/40 border border-purple-500/40 p-3.5 text-sm text-slate-100 shadow-md">
+                          <div className="font-semibold text-xs text-purple-300 mb-1 flex items-center gap-1.5">
+                            <Terminal className="w-3.5 h-3.5" />
+                            <span>Task Prompt</span>
+                          </div>
+                          <p className="whitespace-pre-wrap">{safeString(ev.content)}</p>
                         </div>
-                        <p className="whitespace-pre-wrap">{ev.content}</p>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* User Command */}
-                  {ev.type === 'user_command' && (
-                    <div className="flex justify-end mb-2">
-                      <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs font-mono text-cyan-300">
-                        {ev.content}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Model Thought */}
-                  {ev.type === 'thought' && (
-                    <div className="rounded-xl bg-purple-950/20 border border-purple-500/20 p-3 text-xs text-purple-200/90 leading-relaxed">
-                      <div className="flex items-center gap-1.5 font-semibold text-purple-400 mb-1">
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Reasoning & Planning</span>
-                      </div>
-                      <div className="whitespace-pre-wrap font-sans">{ev.content}</div>
-                    </div>
-                  )}
-
-                  {/* Tool Call Start */}
-                  {ev.type === 'tool_start' && (
-                    <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-3 text-xs">
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded font-mono font-medium">
-                            {ev.tool}
-                          </span>
-                          <span className="text-slate-400">Executing...</span>
+                    {/* User Slash Command */}
+                    {ev.type === 'user_command' && (
+                      <div className="flex justify-end mb-2">
+                        <div className="rounded-xl bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs font-mono text-cyan-300 shadow-sm">
+                          {safeString(ev.content)}
                         </div>
-                        <div className="animate-spin w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full" />
                       </div>
-                      <pre className="p-2 bg-slate-950 rounded text-slate-300 font-mono text-[11px] overflow-x-auto">
-                        {JSON.stringify(ev.arguments, null, 2)}
-                      </pre>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Tool Result */}
-                  {ev.type === 'tool_result' && (
-                    <div className="rounded-xl bg-slate-900/80 border border-slate-800/80 p-3.5 text-xs shadow-md">
-                      <div className="flex items-center justify-between gap-2 mb-2 border-b border-slate-800 pb-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded font-mono font-medium text-[11px] ${
-                            ev.success
-                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                              : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                          }`}>
-                            {ev.tool}
+                    {/* Model Thought */}
+                    {ev.type === 'thought' && (
+                      <div className="rounded-xl bg-purple-950/20 border border-purple-500/20 p-3 text-xs text-purple-200/90 leading-relaxed shadow-sm">
+                        <div className="flex items-center justify-between gap-1.5 font-semibold text-purple-400 mb-1">
+                          <span className="flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Reasoning & Planning</span>
                           </span>
-                          <span className="text-slate-400 font-mono">
-                            {ev.success ? 'Success' : 'Failed'}
-                          </span>
+                          <button
+                            onClick={() => handleCopyText(ev.id, ev.content)}
+                            className="text-purple-400 hover:text-purple-200 transition-colors p-1"
+                            title="Copy thought"
+                          >
+                            {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                          </button>
                         </div>
-                        {ev.duration_ms && (
-                          <span className="text-[11px] font-mono text-slate-500">
-                            {Math.round(ev.duration_ms)}ms
-                          </span>
+                        <div className="whitespace-pre-wrap font-sans">{safeString(ev.content)}</div>
+                      </div>
+                    )}
+
+                    {/* Tool Call Start */}
+                    {ev.type === 'tool_start' && (
+                      <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-3 text-xs">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded font-mono font-medium">
+                              {safeString(ev.tool)}
+                            </span>
+                            <span className="text-slate-400">Executing tool...</span>
+                          </div>
+                          <div className="animate-spin w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full" />
+                        </div>
+                        {ev.arguments && Object.keys(ev.arguments).length > 0 && (
+                          <pre className="p-2 bg-slate-950 rounded text-slate-300 font-mono text-[11px] overflow-x-auto">
+                            {safeString(ev.arguments)}
+                          </pre>
                         )}
                       </div>
-                      <pre className="p-2.5 bg-slate-950 rounded-lg text-slate-200 font-mono text-[11px] whitespace-pre-wrap max-h-80 overflow-y-auto leading-relaxed">
-                        {ev.output}
-                      </pre>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Task Complete */}
-                  {ev.type === 'complete' && (
-                    <div className="rounded-2xl bg-gradient-to-r from-emerald-950/30 via-slate-900 to-slate-900 border border-emerald-500/30 p-4 text-xs text-slate-200 shadow-xl">
-                      <div className="flex items-center justify-between gap-2 mb-2 border-b border-slate-800 pb-2">
-                        <div className="flex items-center gap-2 font-semibold text-emerald-400 text-sm">
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>Task Completed Successfully</span>
+                    {/* Tool Result */}
+                    {ev.type === 'tool_result' && (
+                      <div className="rounded-xl bg-slate-900/80 border border-slate-800/80 p-3.5 text-xs shadow-md">
+                        <div className="flex items-center justify-between gap-2 mb-2 border-b border-slate-800 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded font-mono font-medium text-[11px] ${
+                              ev.success
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                            }`}>
+                              {safeString(ev.tool)}
+                            </span>
+                            <span className="text-slate-400 font-mono text-[11px]">
+                              {ev.success ? 'Success' : 'Notice / Handled'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {ev.duration_ms != null && (
+                              <span className="text-[11px] font-mono text-slate-500">
+                                {Math.round(Number(ev.duration_ms))}ms
+                              </span>
+                            )}
+                            <button
+                              onClick={() => handleCopyText(ev.id, ev.output)}
+                              className="text-slate-400 hover:text-white transition-colors p-1"
+                              title="Copy output"
+                            >
+                              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
                         </div>
-                        {ev.total_time_ms && (
-                          <span className="text-slate-400 font-mono text-[11px]">
-                            {Math.round(ev.total_time_ms)}ms total
-                          </span>
-                        )}
+                        <pre className="p-2.5 bg-slate-950 rounded-lg text-slate-200 font-mono text-[11px] whitespace-pre-wrap max-h-80 overflow-y-auto leading-relaxed">
+                          {outputText}
+                        </pre>
                       </div>
-                      <div className="whitespace-pre-wrap font-sans text-sm leading-relaxed mt-2 text-slate-100">
-                        {ev.final_response}
-                      </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Error */}
-                  {ev.type === 'error' && (
-                    <div className="rounded-xl bg-rose-950/20 border border-rose-500/30 p-3 text-xs text-rose-300 flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                      <div>
-                        <div className="font-semibold text-rose-400 mb-0.5">Execution Error</div>
-                        <div>{ev.output}</div>
+                    {/* Task Complete */}
+                    {ev.type === 'complete' && (
+                      <div className="rounded-2xl bg-gradient-to-r from-emerald-950/30 via-slate-900 to-slate-900 border border-emerald-500/30 p-4 text-xs text-slate-200 shadow-xl">
+                        <div className="flex items-center justify-between gap-2 mb-2 border-b border-slate-800 pb-2">
+                          <div className="flex items-center gap-2 font-semibold text-emerald-400 text-sm">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Task Completed Successfully</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {ev.total_time_ms != null && (
+                              <span className="text-slate-400 font-mono text-[11px]">
+                                {Math.round(Number(ev.total_time_ms))}ms total
+                              </span>
+                            )}
+                            <button
+                              onClick={() => handleCopyText(ev.id, ev.final_response)}
+                              className="text-slate-400 hover:text-white transition-colors p-1"
+                              title="Copy final response"
+                            >
+                              {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="whitespace-pre-wrap font-sans text-sm leading-relaxed mt-2 text-slate-100">
+                          {safeString(ev.final_response)}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              ))
+                    )}
+
+                    {/* Error */}
+                    {ev.type === 'error' && (
+                      <div className="rounded-xl bg-rose-950/20 border border-rose-500/30 p-3 text-xs text-rose-300 flex items-start gap-2 shadow-sm">
+                        <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-rose-400 mb-0.5">Execution Notification</div>
+                          <div className="whitespace-pre-wrap font-mono text-[11px]">{safeString(ev.output)}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
             <div ref={eventsEndRef} />
           </div>
@@ -582,19 +794,28 @@ export default function ClawStudio({ health, settings }) {
             <div className="flex items-center justify-between gap-2">
               <h4 className="font-semibold text-slate-200 flex items-center gap-2 text-sm">
                 <GitBranch className="w-4 h-4 text-cyan-400" />
-                Working Directory Diff
+                Working Directory Git Diff
               </h4>
-              <button
-                onClick={handleLoadDiff}
-                disabled={diffLoading}
-                className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg transition-colors border border-slate-700"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${diffLoading ? 'animate-spin' : ''}`} />
-                <span>Refresh Diff</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleRunSlash('/commit')}
+                  className="flex items-center gap-1.5 px-3 py-1 bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 text-xs rounded-lg transition-colors border border-purple-500/40"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Commit Diff (/commit)</span>
+                </button>
+                <button
+                  onClick={handleLoadDiff}
+                  disabled={diffLoading}
+                  className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg transition-colors border border-slate-700"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${diffLoading ? 'animate-spin' : ''}`} />
+                  <span>Refresh Diff</span>
+                </button>
+              </div>
             </div>
             <pre className="p-4 bg-slate-950 rounded-xl border border-slate-800 text-xs font-mono text-slate-200 whitespace-pre-wrap overflow-x-auto leading-relaxed min-h-[300px]">
-              {gitDiff || 'Click "Refresh Diff" to inspect changes.'}
+              {safeString(gitDiff || 'Click "Refresh Diff" to inspect changes.')}
             </pre>
           </div>
         )}
@@ -620,13 +841,13 @@ export default function ClawStudio({ health, settings }) {
               </div>
             ) : (
               memoryFiles.map((f, i) => (
-                <div key={i} className="rounded-xl bg-slate-900 border border-slate-800 p-4">
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="font-semibold text-purple-300 font-mono">{f.file_name}</span>
-                    <span className="text-slate-500 font-mono">{f.char_count} chars</span>
+                <div key={i} className="rounded-xl bg-slate-900 border border-slate-800 p-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-purple-300 font-mono">{safeString(f.file_name)}</span>
+                    <span className="text-slate-500 font-mono">{safeString(f.char_count)} chars</span>
                   </div>
                   <pre className="p-3 bg-slate-950 rounded-lg text-slate-300 font-mono text-[11px] whitespace-pre-wrap max-h-60 overflow-y-auto">
-                    {f.content}
+                    {safeString(f.content)}
                   </pre>
                 </div>
               ))
@@ -648,7 +869,7 @@ export default function ClawStudio({ health, settings }) {
                 value={directCommand}
                 onChange={(e) => setDirectCommand(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleRunDirect()}
-                placeholder="npm test, git status, ls -la..."
+                placeholder="git status, git diff, ls -la, python3 -m unittest..."
                 className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-emerald-500"
               />
               <button
@@ -659,9 +880,29 @@ export default function ClawStudio({ health, settings }) {
                 {directLoading ? 'Running...' : 'Run'}
               </button>
             </div>
+            
+            {/* Quick Command Chips */}
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-[10px] text-slate-500 font-mono">Quick Run:</span>
+              {['git status', 'git diff', 'ls -la', 'pwd'].map((cmd) => (
+                <button
+                  key={cmd}
+                  onClick={() => {
+                    setDirectCommand(cmd);
+                    executeDirectTool('bash', { command: cmd }).then(res => {
+                      setDirectOutput(safeString(res?.output || res?.error));
+                    });
+                  }}
+                  className="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded font-mono text-[10px] border border-slate-800"
+                >
+                  {cmd}
+                </button>
+              ))}
+            </div>
+
             {directOutput && (
               <pre className="p-4 bg-slate-950 rounded-xl border border-slate-800 text-xs font-mono text-slate-200 whitespace-pre-wrap overflow-x-auto min-h-[200px]">
-                {directOutput}
+                {safeString(directOutput)}
               </pre>
             )}
           </div>
@@ -690,8 +931,8 @@ export default function ClawStudio({ health, settings }) {
 
             {isExecuting ? (
               <button
-                onClick={() => setIsExecuting(false)}
-                className="p-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition-all shrink-0 flex items-center justify-center shadow-lg"
+                onClick={handleStopExecution}
+                className="p-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition-all shrink-0 flex items-center justify-center shadow-lg active:scale-95"
                 title="Stop Execution"
               >
                 <Square className="w-4 h-4 fill-white" />

@@ -22,11 +22,18 @@ export default function Sidebar({
 }) {
   const [searchTerm, setSearchTerm] = useState('');
 
+  const convList = Array.isArray(conversations) ? conversations : [];
+
   // Filter conversations
-  const filtered = conversations.filter(conv => {
-    const title = conv.preview || conv.session_id || '';
-    return title.toLowerCase().includes(searchTerm.toLowerCase());
+  const filtered = convList.filter(conv => {
+    if (!conv) return false;
+    const title = conv.preview || conv.session_id || conv.user_prompt || '';
+    return String(title).toLowerCase().includes(searchTerm.toLowerCase());
   });
+
+  const rssMb = latestMetrics?.latest_rss_mb || 
+                latestMetrics?.system_resources?.process_memory_rss_mb || 
+                null;
 
   return (
     <aside
@@ -68,11 +75,17 @@ export default function Sidebar({
           </div>
         ) : (
           filtered.map((conv) => {
+            if (!conv) return null;
             const isSelected = conv.session_id === currentSessionId;
             const previewText = conv.preview || conv.user_prompt || 'Untitled Conversation';
-            const dateStr = conv.updated_at 
-              ? new Date(conv.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })
-              : 'Recent';
+            let dateStr = 'Recent';
+            if (conv.updated_at) {
+              try {
+                dateStr = new Date(conv.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' });
+              } catch (e) {
+                dateStr = 'Recent';
+              }
+            }
 
             return (
               <button
@@ -121,9 +134,7 @@ export default function Sidebar({
               M2 Memory RSS
             </span>
             <span className="font-mono font-semibold text-slate-200">
-              {latestMetrics?.latest_rss_mb 
-                ? `${Math.round(latestMetrics.latest_rss_mb)} MB` 
-                : '1.2 GB'}
+              {rssMb ? `${Math.round(Number(rssMb))} MB` : 'Dynamic Safe'}
             </span>
           </div>
 

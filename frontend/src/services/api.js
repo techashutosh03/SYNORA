@@ -1,24 +1,41 @@
-// SYNORA AI - API Service Layer
+/**
+ * SYNORA AI + Claw Code API Client
+ * Robust, memory-safe communication with the local FastAPI backend.
+ */
 
 const API_BASE = '';
 
+// ==========================================
+// SYSTEM & HEALTH
+// ==========================================
+
 export async function fetchHealth() {
-  const res = await fetch(`${API_BASE}/api/health`);
-  if (!res.ok) throw new Error(`Health check failed: ${res.statusText}`);
-  return await res.json();
+  try {
+    const res = await fetch(`${API_BASE}/api/health`);
+    if (!res.ok) throw new Error(`Health check failed: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('fetchHealth error:', err);
+    return null;
+  }
 }
 
 export async function fetchSettings() {
-  const res = await fetch(`${API_BASE}/api/settings`);
-  if (!res.ok) throw new Error(`Fetch settings failed: ${res.statusText}`);
-  return await res.json();
+  try {
+    const res = await fetch(`${API_BASE}/api/settings`);
+    if (!res.ok) throw new Error(`Fetch settings failed: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('fetchSettings error:', err);
+    return null;
+  }
 }
 
-export async function updateSettings(settings) {
+export async function updateSettings(newSettings) {
   const res = await fetch(`${API_BASE}/api/settings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(settings),
+    body: JSON.stringify(newSettings),
   });
   if (!res.ok) throw new Error(`Update settings failed: ${res.statusText}`);
   return await res.json();
@@ -42,9 +59,14 @@ export async function selectActiveModels(modelIds) {
 }
 
 export async function fetchConversations(limit = 30) {
-  const res = await fetch(`${API_BASE}/api/conversations?limit=${limit}`);
-  if (!res.ok) throw new Error(`Fetch conversations failed: ${res.statusText}`);
-  return await res.json();
+  try {
+    const res = await fetch(`${API_BASE}/api/conversations?limit=${limit}`);
+    if (!res.ok) throw new Error(`Fetch conversations failed: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('fetchConversations error:', err);
+    return { conversations: [] };
+  }
 }
 
 export async function fetchConversationTurns(sessionId, limit = 50) {
@@ -54,39 +76,62 @@ export async function fetchConversationTurns(sessionId, limit = 50) {
 }
 
 export async function fetchMetrics() {
-  const res = await fetch(`${API_BASE}/api/metrics`);
-  if (!res.ok) throw new Error(`Fetch metrics failed: ${res.statusText}`);
-  return await res.json();
+  try {
+    const res = await fetch(`${API_BASE}/api/metrics`);
+    if (!res.ok) throw new Error(`Fetch metrics failed: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.warn('fetchMetrics error:', err);
+    return null;
+  }
 }
 
-export async function sendChatMessage({ prompt, sessionId, selectedModels = null }) {
+// ==========================================
+// CHAT & MULTI-MODEL ORCHESTRATION
+// ==========================================
+
+export async function sendChatMessage({ prompt, sessionId, selectedModels = null, simulate = false }) {
   const payload = {
     prompt,
     session_id: sessionId,
     selected_models: selectedModels,
+    simulate: Boolean(simulate),
   };
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(`Chat request failed: ${res.statusText}`);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || errData.message || `Chat request failed: ${res.statusText}`);
+  }
   return await res.json();
 }
 
+/**
+ * SSE Streaming for SYNORA Multi-Model Chat
+ * Handles routing, stage_start, stage_complete, synthesis_start, token, done, error
+ */
 export async function streamChatMessage({
   prompt,
   sessionId,
-  selectedModels = null,
-  onStageChange,
+  customModels = null,
+  simulate = false,
+  signal = null,
+  onRouting,
+  onStageStart,
+  onStageComplete,
+  onSynthesisStart,
   onToken,
-  onComplete,
+  onDone,
   onError,
 }) {
   const payload = {
     prompt,
     session_id: sessionId,
-    selected_models: selectedModels,
+    custom_models: customModels,
+    simulate: Boolean(simulate),
   };
 
   try {
@@ -94,10 +139,12 @@ export async function streamChatMessage({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal,
     });
 
     if (!res.ok) {
-      throw new Error(`Stream request failed: ${res.statusText}`);
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || errData.message || `Stream request failed: ${res.statusText}`);
     }
 
     const reader = res.body.getReader();
@@ -109,38 +156,71 @@ export async function streamChatMessage({
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || '';
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() || '';
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const jsonStr = trimmed.slice(5).trim();
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+
+        let currentEvent = null;
+        let dataStr = null;
+
+        const lines = block.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('event:')) {
+            currentEvent = trimmed.slice(6).trim();
+          } else if (trimmed.startsWith('data:')) {
+            dataStr = trimmed.slice(5).trim();
+          }
+        }
+
+        if (!dataStr) continue;
+
         try {
-          const data = JSON.parse(jsonStr);
-          switch (data.event) {
-            case 'stage':
-              onStageChange?.(data);
+          const parsed = JSON.parse(dataStr);
+          const eventType = currentEvent || parsed.event;
+
+          switch (eventType) {
+            case 'routing':
+              onRouting?.(parsed);
+              break;
+            case 'stage_start':
+              onStageStart?.(parsed);
+              break;
+            case 'stage_complete':
+              onStageComplete?.(parsed);
+              break;
+            case 'synthesis_start':
+              onSynthesisStart?.(parsed);
               break;
             case 'token':
-              onToken?.(data.token);
+              if (parsed.delta) {
+                onToken?.(parsed.delta);
+              } else if (parsed.token) {
+                onToken?.(parsed.token);
+              }
               break;
-            case 'complete':
-              onComplete?.(data);
+            case 'done':
+              onDone?.(parsed);
               break;
             case 'error':
-              onError?.(data.message || 'Stream error');
+              onError?.(parsed);
               break;
             default:
               break;
           }
         } catch (e) {
-          console.warn('Failed parsing SSE JSON:', jsonStr, e);
+          console.warn('Failed parsing chat SSE block:', dataStr, e);
         }
       }
     }
   } catch (err) {
-    onError?.(err.message || 'Network error streaming chat');
+    if (err.name === 'AbortError') {
+      console.log('Chat stream aborted by user');
+      return;
+    }
+    onError?.(err);
   }
 }
 
@@ -148,11 +228,15 @@ export async function streamChatMessage({
 // 🦞 CLAW CODE AGENT HARNESS CLIENT
 // ==========================================
 
+/**
+ * SSE Streaming for Claw Code Autonomous Loop
+ */
 export async function streamAgentTask({
   task,
   modelId = 'qwen2.5-coder:7b',
   maxTurns = 12,
   workspaceRoot = null,
+  signal = null,
   onStart,
   onThought,
   onToolStart,
@@ -172,10 +256,12 @@ export async function streamAgentTask({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal,
     });
 
     if (!res.ok) {
-      throw new Error(`Agent stream request failed: ${res.statusText}`);
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || errData.message || `Agent stream request failed: ${res.statusText}`);
     }
 
     const reader = res.body.getReader();
@@ -187,16 +273,32 @@ export async function streamAgentTask({
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || '';
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() || '';
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const jsonStr = trimmed.slice(5).trim();
+      for (const block of blocks) {
+        if (!block.trim()) continue;
+
+        let currentEvent = null;
+        let dataStr = null;
+
+        const lines = block.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('event:')) {
+            currentEvent = trimmed.slice(6).trim();
+          } else if (trimmed.startsWith('data:')) {
+            dataStr = trimmed.slice(5).trim();
+          }
+        }
+
+        if (!dataStr) continue;
+
         try {
-          const data = JSON.parse(jsonStr);
-          switch (data.event) {
+          const data = JSON.parse(dataStr);
+          const eventType = currentEvent || data.event;
+
+          switch (eventType) {
             case 'start':
               onStart?.(data);
               break;
@@ -219,11 +321,15 @@ export async function streamAgentTask({
               break;
           }
         } catch (e) {
-          console.warn('Failed parsing agent SSE event:', jsonStr, e);
+          console.warn('Failed parsing agent SSE event:', dataStr, e);
         }
       }
     }
   } catch (err) {
+    if (err.name === 'AbortError') {
+      console.log('Agent stream aborted by user');
+      return;
+    }
     onError?.(err);
   }
 }
@@ -240,7 +346,10 @@ export async function executeSlashCommand({ command, workspaceRoot = null }) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command, workspace_root: workspaceRoot }),
   });
-  if (!res.ok) throw new Error(`Slash command execution failed: ${res.statusText}`);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || errData.message || `Slash command execution failed: ${res.statusText}`);
+  }
   return await res.json();
 }
 
@@ -269,7 +378,10 @@ export async function setClawWorkspace(path) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
   });
-  if (!res.ok) throw new Error(`Failed to set workspace: ${res.statusText}`);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || errData.message || `Failed to set workspace: ${res.statusText}`);
+  }
   return await res.json();
 }
 
@@ -295,6 +407,9 @@ export async function executeDirectTool(toolName, argumentsObj = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tool_name: toolName, arguments: argumentsObj }),
   });
-  if (!res.ok) throw new Error('Failed to execute tool directly');
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || errData.message || 'Failed to execute tool directly');
+  }
   return await res.json();
 }
