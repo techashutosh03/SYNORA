@@ -49,7 +49,7 @@ export async function fetchConversations(limit = 30) {
 
 export async function fetchConversationTurns(sessionId, limit = 50) {
   const res = await fetch(`${API_BASE}/api/conversations/${sessionId}?limit=${limit}`);
-  if (!res.ok) throw new Error(`Fetch session turns failed: ${res.statusText}`);
+  if (!res.ok) throw new Error(`Fetch conversation turns failed: ${res.statusText}`);
   return await res.json();
 }
 
@@ -59,154 +59,100 @@ export async function fetchMetrics() {
   return await res.json();
 }
 
-/**
- * Standard Chat API call (fallback)
- */
-export async function sendChatMessage({ prompt, sessionId, customModels, simulate = false }) {
+export async function sendChatMessage({ prompt, sessionId, selectedModels = null }) {
+  const payload = {
+    prompt,
+    session_id: sessionId,
+    selected_models: selectedModels,
+  };
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt,
-      session_id: sessionId,
-      custom_models: customModels,
-      simulate: Boolean(simulate),
-    }),
+    body: JSON.stringify(payload),
   });
-
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({ detail: { message: res.statusText } }));
-    throw errorData;
-  }
-
+  if (!res.ok) throw new Error(`Chat request failed: ${res.statusText}`);
   return await res.json();
 }
 
-/**
- * Streaming Chat API via Server-Sent Events (SSE)
- */
 export async function streamChatMessage({
   prompt,
   sessionId,
-  customModels,
-  simulate = false,
-  onRouting,
-  onStageStart,
-  onStageComplete,
-  onSynthesisStart,
+  selectedModels = null,
+  onStageChange,
   onToken,
-  onDone,
+  onComplete,
   onError,
 }) {
+  const payload = {
+    prompt,
+    session_id: sessionId,
+    selected_models: selectedModels,
+  };
+
   try {
-    const response = await fetch(`${API_BASE}/api/chat/stream`, {
+    const res = await fetch(`${API_BASE}/api/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt,
-        session_id: sessionId,
-        custom_models: customModels,
-        simulate: Boolean(simulate),
-      }),
+      body: JSON.stringify(payload),
     });
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({ detail: response.statusText }));
-      onError?.(err);
-      return;
+    if (!res.ok) {
+      throw new Error(`Stream request failed: ${res.statusText}`);
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
     let buffer = '';
 
     while (true) {
-      const { value, done } = await reader.read();
+      const { done, value } = await reader.read();
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split('\n\n');
-      buffer = events.pop() || ''; // Keep partial last event in buffer
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() || '';
 
-      for (const eventStr of events) {
-        if (!eventStr.trim()) continue;
-        const lines = eventStr.split('\n');
-        let eventName = '';
-        let dataStr = '';
-
-        for (const line of lines) {
-          if (line.startsWith('event:')) {
-            eventName = line.replace('event:', '').trim();
-          } else if (line.startsWith('data:')) {
-            dataStr = line.replace('data:', '').trim();
-          }
-        }
-
-        if (!dataStr) continue;
-
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const jsonStr = trimmed.slice(5).trim();
         try {
-          const payload = JSON.parse(dataStr);
-          switch (eventName) {
-            case 'routing':
-              onRouting?.(payload);
-              break;
-            case 'stage_start':
-              onStageStart?.(payload);
-              break;
-            case 'stage_complete':
-              onStageComplete?.(payload);
-              break;
-            case 'synthesis_start':
-              onSynthesisStart?.(payload);
+          const data = JSON.parse(jsonStr);
+          switch (data.event) {
+            case 'stage':
+              onStageChange?.(data);
               break;
             case 'token':
-              onToken?.(payload.delta);
+              onToken?.(data.token);
               break;
-            case 'done':
-              onDone?.(payload);
+            case 'complete':
+              onComplete?.(data);
               break;
             case 'error':
-              onError?.(payload);
+              onError?.(data.message || 'Stream error');
               break;
             default:
               break;
           }
         } catch (e) {
-          console.warn('Failed parsing SSE payload:', dataStr, e);
+          console.warn('Failed parsing SSE JSON:', jsonStr, e);
         }
       }
     }
   } catch (err) {
-    onError?.(err);
+    onError?.(err.message || 'Network error streaming chat');
   }
 }
 
-/**
- * Run Autonomous Agent Task (Claw Code Engine)
- */
-export async function runAgentTask({ task, modelId, maxTurns = 12, workspaceRoot }) {
-  const res = await fetch(`${API_BASE}/api/agent/task`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      task,
-      model_id: modelId,
-      max_turns: maxTurns,
-      workspace_root: workspaceRoot,
-    }),
-  });
-  if (!res.ok) throw new Error(`Agent task failed: ${res.statusText}`);
-  return await res.json();
-}
+// ==========================================
+// 🦞 CLAW CODE AGENT HARNESS CLIENT
+// ==========================================
 
-/**
- * Stream Autonomous Agent Task via SSE
- */
 export async function streamAgentTask({
   task,
-  modelId,
+  modelId = 'qwen2.5-coder:7b',
   maxTurns = 12,
-  workspaceRoot,
+  workspaceRoot = null,
   onStart,
   onThought,
   onToolStart,
@@ -214,16 +160,18 @@ export async function streamAgentTask({
   onComplete,
   onError,
 }) {
+  const payload = {
+    task,
+    model_id: modelId,
+    max_turns: maxTurns,
+    workspace_root: workspaceRoot,
+  };
+
   try {
     const res = await fetch(`${API_BASE}/api/agent/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        task,
-        model_id: modelId,
-        max_turns: maxTurns,
-        workspace_root: workspaceRoot,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
@@ -286,3 +234,67 @@ export async function fetchAgentTools() {
   return await res.json();
 }
 
+export async function executeSlashCommand({ command, workspaceRoot = null }) {
+  const res = await fetch(`${API_BASE}/api/claw/slash`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command, workspace_root: workspaceRoot }),
+  });
+  if (!res.ok) throw new Error(`Slash command execution failed: ${res.statusText}`);
+  return await res.json();
+}
+
+export async function fetchClawStatus() {
+  const res = await fetch(`${API_BASE}/api/claw/status`);
+  if (!res.ok) throw new Error(`Failed to fetch Claw status: ${res.statusText}`);
+  return await res.json();
+}
+
+export async function fetchClawDoctor() {
+  const res = await fetch(`${API_BASE}/api/claw/doctor`);
+  if (!res.ok) throw new Error(`Failed to run Claw doctor: ${res.statusText}`);
+  return await res.json();
+}
+
+export async function fetchClawDiff(path = null) {
+  const query = path ? `?path=${encodeURIComponent(path)}` : '';
+  const res = await fetch(`${API_BASE}/api/claw/diff${query}`);
+  if (!res.ok) throw new Error(`Failed to fetch git diff: ${res.statusText}`);
+  return await res.json();
+}
+
+export async function setClawWorkspace(path) {
+  const res = await fetch(`${API_BASE}/api/claw/workspace`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) throw new Error(`Failed to set workspace: ${res.statusText}`);
+  return await res.json();
+}
+
+export async function fetchClawPermissions() {
+  const res = await fetch(`${API_BASE}/api/agent/permissions`);
+  if (!res.ok) throw new Error('Failed to fetch permissions');
+  return await res.json();
+}
+
+export async function updateClawPermissions(mode) {
+  const res = await fetch(`${API_BASE}/api/agent/permissions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  if (!res.ok) throw new Error('Failed to update permissions');
+  return await res.json();
+}
+
+export async function executeDirectTool(toolName, argumentsObj = {}) {
+  const res = await fetch(`${API_BASE}/api/agent/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool_name: toolName, arguments: argumentsObj }),
+  });
+  if (!res.ok) throw new Error('Failed to execute tool directly');
+  return await res.json();
+}

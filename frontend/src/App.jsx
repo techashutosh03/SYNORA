@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
+import ClawStudio from './components/ClawStudio';
 import ModelActivityDrawer from './components/ModelActivityDrawer';
 import SettingsModal from './components/SettingsModal';
 import { 
@@ -20,6 +21,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [currentView, setCurrentView] = useState('chat'); // 'chat' | 'claw'
 
   const [health, setHealth] = useState(null);
   const [settings, setSettings] = useState(null);
@@ -108,7 +110,7 @@ export default function App() {
     const currentSim = settings?.allow_simulation ?? false;
     const nextSim = !currentSim;
     try {
-      const updated = await updateSettings({ allow_simulation: nextSim });
+      await updateSettings({ allow_simulation: nextSim });
       setSettings(prev => ({ ...prev, allow_simulation: nextSim }));
     } catch (err) {
       console.error('Failed toggling simulation:', err);
@@ -201,7 +203,7 @@ export default function App() {
             setStreamingText('');
             setStreamingStage(null);
             setActivePipeline(null);
-            refreshAll();
+            refreshAllData();
           },
           onError: (err) => {
             setIsGenerating(false);
@@ -223,7 +225,6 @@ export default function App() {
       }
       return;
     }
-
 
     try {
       await streamChatMessage({
@@ -291,18 +292,15 @@ export default function App() {
           setStreamingStage(null);
           setActivePipeline(prev => ({ ...prev, isRunning: false }));
 
-          // Refresh session list
           fetchConversations().then(cData => {
             if (cData?.conversations) setConversations(cData.conversations);
           });
-          // Refresh metrics
           fetchMetrics().then(mData => {
             if (mData) setMetrics(mData);
           });
         },
         onError: (err) => {
           console.warn('Inference error received from backend:', err);
-          
           const errorTitle = err?.error || err?.detail?.error || 'Model Unavailable';
           const modelId = err?.model || err?.detail?.model;
           const installCmd = err?.install_command || err?.detail?.install_command;
@@ -389,23 +387,29 @@ export default function App() {
           settings={settings}
           onToggleSimulation={handleToggleSimulation}
           latestMetrics={metrics}
+          currentView={currentView}
+          setCurrentView={setCurrentView}
         />
 
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          <ChatArea
-            messages={messages}
-            isGenerating={isGenerating}
-            streamingStage={streamingStage}
-            streamingText={streamingText}
-            onSelectPrompt={handleSendMessage}
-            onSendMessage={handleSendMessage}
-            onStopGeneration={handleStopGeneration}
-            isSimulated={settings?.allow_simulation}
-            onToggleSimulation={handleToggleSimulation}
-            selectedPreset={selectedPreset}
-            setSelectedPreset={setSelectedPreset}
-          />
-        </div>
+        {currentView === 'claw' ? (
+          <ClawStudio health={health} settings={settings} />
+        ) : (
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <ChatArea
+              messages={messages}
+              isGenerating={isGenerating}
+              streamingStage={streamingStage}
+              streamingText={streamingText}
+              onSelectPrompt={handleSendMessage}
+              onSendMessage={handleSendMessage}
+              onStopGeneration={handleStopGeneration}
+              isSimulated={settings?.allow_simulation}
+              onToggleSimulation={handleToggleSimulation}
+              selectedPreset={selectedPreset}
+              setSelectedPreset={setSelectedPreset}
+            />
+          </div>
+        )}
       </main>
 
       {/* Right Drawer: Model Activity */}

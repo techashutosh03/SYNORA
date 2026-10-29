@@ -1,36 +1,46 @@
-# SYNORA AI 🚀
-> **Many Minds. One Intelligence.**
+# SYNORA AI 🚀 + CLAW CODE 🦞
+> **Many Minds. One Intelligence. Autonomous Coding Agent Harness.**
 
-SYNORA AI is a unified multi-model AI system that orchestrates the capabilities of open-weight artificial intelligence models into a single, cohesive intelligence.
+SYNORA AI is a unified multi-model platform that orchestrates open-weight artificial intelligence models into a single, cohesive intelligence. Fully integrated with **Claw Code**, SYNORA provides an autonomous software engineering harness capable of multi-turn code generation, surgical refactoring, git automation, and terminal execution.
 
 ---
 
-## ⚡ Architecture Overview
+## ⚡ Unified Architecture Overview
 
 ```text
-                  SYNORA AI
-           Many Minds. One Intelligence.
-                       │
-                 User Question
-                       │
-                  SYNORA CORE
-                       │
-              Intelligent Router
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-       DeepSeek       Qwen         Llama
-       Phi-4          Mistral      Gemma
-       StarCoder      Granite      Others (30 Cataloged)
-          │            │            │
-          └────────────┼────────────┘
-                       │
-               SYNORA SYNTHESIS
-                       │
-                 ONE RESPONSE
-                       │
-                     USER
+                  SYNORA AI + CLAW CODE
+              Many Minds. One Intelligence.
+                            │
+        ┌───────────────────┴───────────────────┐
+        ▼                                       ▼
+  SYNORA CHAT (Web UI)                  CLAW CODE HARNESS
+(Multi-Model Orchestration)            (CLI & Studio Engine)
+        │                                       │
+  Intelligent Router                   Autonomous Agent Loop
+        │                                       │
+  ┌─────┼─────┐                         ┌───────┼───────┐
+  ▼     ▼     ▼                         ▼       ▼       ▼
+DeepSeek Qwen Llama                  Filesystem Shell  Git Engine
+(Reason)(Code)(Synthesize)           (read/edit)(bash) (diff/commit)
+        │                                       │
+  Unified Output                        Verified Working Code
 ```
+
+---
+
+## 🦞 Claw Code Integration Features
+
+| Capability | CLI (`./claw`) | Web UI (Claw Studio) |
+|---|---|---|
+| **Interactive REPL** | `./claw` | Live Event Stream (`http://localhost:5173`) |
+| **Preflight Doctor** | `./claw doctor` | One-click `🩺 /doctor` button |
+| **Git Status & Branch** | `./claw status` | Top workspace badge with dirty file count |
+| **Working Diff** | `./claw diff` | Syntax-highlighted Diff tab |
+| **Code Review** | `./claw review` | Autonomous multi-model review of git diff |
+| **Smart Commits** | `./claw commit` | One-click semantic commit generator |
+| **Project Guidance** | Auto-loads `CLAUDE.md`/`AGENTS.md` | "Project Guidelines" viewer |
+| **Security Gates** | `autonomous`, `ask`, `read_only` | Interactive approval banner |
+| **Native Tools (12+)** | `bash`, `read`, `write`, `edit`, `grep`, `glob`, `list_dir`, `git_status`, `git_diff`, `git_commit`, `web_fetch`, `todo_write` | Live cards with duration metrics |
 
 ---
 
@@ -38,14 +48,15 @@ SYNORA AI is a unified multi-model AI system that orchestrates the capabilities 
 
 | Component | Technology |
 |---|---|
-| **Project Name** | SYNORA AI |
-| **Model Catalog** | 30 open-weight models (Qwen, DeepSeek, Llama, Mistral, Phi, etc.) |
-| **Inference Engine** | Ollama |
-| **Backend** | Python 3.10+ & FastAPI |
-| **Orchestration** | Custom Sequential Multi-Model Pipeline (M2 Memory-Safe) |
+| **Project Name** | SYNORA AI + Claw Code |
+| **Model Catalog** | 30 open-weight models (Qwen 2.5 Coder, DeepSeek R1, Llama 3.1, etc.) |
+| **Agent Engine** | Claw Code Autonomous Multi-Turn Loop with Native Tool Calling |
+| **Claw Code Canonical Core** | Rust Cargo Workspace (`claw-code/rust`) + Python parity suite |
+| **Inference Engine** | Local Ollama (M2 memory-safe: sequential execution with `keep_alive=0`) |
+| **Backend API** | Python 3.10+ & FastAPI |
+| **Frontend UI** | React 19 + Vite + Tailwind CSS (Dual-mode: Chat + Claw Studio) |
 | **Database** | SQLite (`synora.db`) |
-| **Vector Database** | ChromaDB *(Milestone v0.3)* |
-| **Target Device** | MacBook Air M2, 16GB RAM |
+| **Target Device** | Apple Silicon M2, 16GB RAM |
 
 ---
 
@@ -54,43 +65,44 @@ SYNORA AI is a unified multi-model AI system that orchestrates the capabilities 
 ```text
 SYNORA/
 │
-├── backend/
-│   ├── main.py               # FastAPI application & REST endpoints
-│   ├── config.py             # Settings & M2 memory optimization limits
-│   ├── requirements.txt      # Python dependencies
-│   │
-│   ├── core/
-│   │   ├── router.py         # Sub-millisecond intent & complexity router
-│   │   ├── orchestrator.py   # Sequential pipeline execution (keep_alive=0)
-│   │   ├── synthesizer.py    # Output merging & attribution formatting
-│   │   └── evaluator.py      # Multi-model consensus & conflict evaluation
-│   │
-│   ├── models/
-│   │   └── registry.py       # 30-model catalog, roles, and Ollama sync
-│   │
-│   └── database/
-│       └── sqlite.py         # Chat & orchestration trace persistence
+├── claw                      # Executable CLI launcher for Claw Code agent
+├── synora                    # Unified launcher (starts dev server or CLI)
 │
-├── frontend/                 # React UI (Milestone v0.4)
-├── config/                   # Global configuration files
+├── claw-code/                # Canonical Claw Code Repository
+│   ├── rust/                 # 11-crate Cargo workspace (claw binary, runtime, tools, commands)
+│   ├── src/                  # Python parity & porting workspace
+│   ├── docs/                 # Gate verification maps & documentation
+│   ├── tests/                # Claw Code test suite
+│   ├── USAGE.md              # Claw Code usage manual
+│   └── ROADMAP.md            # Active roadmap & backlog
+│
+├── backend/
+│   ├── main.py               # FastAPI application with REST & SSE endpoints
+│   ├── config.py             # Settings & M2 memory optimization limits
+│   │
+│   ├── agent/                # SYNORA Claw Code Harness
+│   │   ├── cli.py            # Terminal REPL & CLI parser
+│   │   ├── loop.py           # Multi-turn autonomous agent loop
+│   │   ├── tools.py          # 12+ native tools (bash, edit_file, git, etc.)
+│   │   ├── commands.py       # Slash command engine (/doctor, /diff, /review, etc.)
+│   │   ├── permissions.py    # Security gate & destructive command filters
+│   │   └── context.py        # Project memory resolver (CLAUDE.md / AGENTS.md)
+│   │
+│   ├── core/                 # SYNORA Multi-Model Engine (Router, Orchestrator, Synthesizer)
+│   ├── models/               # 30-model catalog & Ollama bridge
+│   └── database/             # SQLite session & telemetry storage
+│
+├── frontend/                 # React UI
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── ClawStudio.jsx         # Claw Code Studio Agent Workspace
+│   │   │   ├── Header.jsx             # Dual-mode switcher (Chat vs Claw Studio)
+│   │   │   ├── ChatArea.jsx           # Multi-model collaborative chat
+│   │   │   └── ModelActivityDrawer.jsx# Real-time orchestration visualizer
+│   │   └── services/api.js            # Unified REST + SSE API client
+│   └── package.json
 └── README.md
 ```
-
----
-
-## 💻 Apple Silicon M2 (16GB RAM) Optimizations
-
-To run smoothly on a 16GB MacBook Air without memory pressure or excessive swapping:
-1. **Ollama Server Flags**:
-   ```bash
-   export OLLAMA_MAX_LOADED_MODELS=1
-   export OLLAMA_NUM_PARALLEL=1
-   ollama serve
-   ```
-2. **Immediate VRAM Release (`keep_alive=0`)**:
-   SYNORA automatically passes `"keep_alive": 0` on every inference call, guaranteeing that models are unloaded immediately upon completing their stage.
-3. **Sequential Execution**:
-   Models are invoked in series (e.g. Qwen generates code $\rightarrow$ DeepSeek audits logic $\rightarrow$ Llama synthesizes), ensuring only 1 model resides in memory at any point in time.
 
 ---
 
@@ -104,7 +116,7 @@ source venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
-### 2. Pull Milestone 0.1 Starter Models (in Ollama)
+### 2. Pull Recommended Models (Ollama)
 
 ```bash
 ollama pull qwen2.5-coder:7b
@@ -112,49 +124,100 @@ ollama pull deepseek-r1:7b
 ollama pull llama3.1:8b
 ```
 
-*(Note: If Ollama is not installed or models are not yet pulled, SYNORA operates in a transparent simulation fallback mode so you can test all API endpoints and orchestration pipelines immediately).*
-
-### 3. Start the SYNORA Backend
-
-```bash
-uvicorn backend.main:app --reload --port 8000
-```
-
-Interactive API documentation will be available at:
-👉 **`http://localhost:8000/docs`**
-
-### 4. Start the SYNORA Frontend (v0.4)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-The SYNORA AI user interface will be live at:
-👉 **`http://localhost:5173`**
+*(Note: If Ollama is offline or models are still downloading, SYNORA and Claw Code operate in transparent simulation / dev mode so you can test all tools, diagnostics, and endpoints immediately).*
 
 ---
 
-## 🔌 API Endpoints (v0.4)
+## 💻 Using Claw Code via Terminal CLI
+
+Launch Claw Code anywhere in your project using the `./claw` script:
+
+### Interactive REPL
+```bash
+./claw
+```
+Inside the REPL:
+- Type any task: `Refactor backend/core/router.py to improve cache lookup`
+- Run slash commands:
+  - `/doctor` — Preflight system & workspace diagnostics
+  - `/status` — Show git branch, uncommitted files, and project memory
+  - `/diff` — View git diff of modifications
+  - `/review` — Run autonomous code review
+  - `/commit` — Stage and commit with structured semantic message
+  - `/tools` — List all registered native tools
+  - `/permissions` — Toggle mode (`autonomous`, `ask`, `read_only`)
+  - `/help` — View command manual
+  - `/exit` — Quit REPL
+
+### Single-Shot Commands
+```bash
+./claw doctor                             # Run diagnostic check
+./claw status                             # Check workspace status
+./claw diff                               # View git diff
+./claw "Fix syntax error in router.py"    # Autonomous single task execution
+```
+
+---
+
+## 🌐 Using Claw Code via Web UI (Claw Code Studio)
+
+1. **Start the Backend**:
+   ```bash
+   uvicorn backend.main:app --reload --port 8000
+   ```
+2. **Start the Frontend**:
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+3. Open **`http://localhost:5173`**
+4. In the top navigation bar, toggle from **SYNORA Chat** to **Claw Code Studio**.
+5. Pick your target workspace directory, run tasks, inspect real-time tool calls and diffs, and execute slash commands with one click!
+
+---
+
+## 🔌 Unified API Endpoints
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/health` | `GET` | System health, Ollama status, storage check, and M2 optimization settings |
-| `/api/settings` | `GET/POST` | Inspect and configure runtime flags (e.g. Simulation Mode, M2 limits) |
-| `/api/metrics` | `GET` | Real-time telemetry, model latency averages, RAM consumption, and disk metrics |
-| `/api/models` | `GET` | List all 30 models with roles, specialties, and installed status |
-| `/api/models/select` | `POST` | Update active models in the routing pool |
-| `/api/chat` | `POST` | Multi-turn contextual chat with multi-factor routing and unified synthesis |
-| `/api/chat/stream` | `POST` | Server-Sent Events (SSE) streaming with live stage transitions & token output |
-| `/api/conversations` | `GET` | List all active conversation sessions and turn summaries |
-| `/api/conversations/{session_id}` | `GET` | Retrieve full chronological message history for a session |
-| `/api/history` | `GET` | Retrieve previous chat conversations and orchestration traces |
-| `/api/agent/task` | `POST` | Execute autonomous coding tasks using Claw Code tools (`bash`, `edit_file`, `grep`, etc.) |
-| `/api/agent/stream` | `POST` | Real-time SSE streaming of agent thoughts, tool execution, and diffs |
-| `/api/agent/tools` | `GET` | Retrieve the active catalog of native Claw Code tools |
-| `/api/agent/execute` | `POST` | Directly dispatch a single tool with security gate validation |
-| `/api/agent/permissions`| `GET/POST`| Inspect and configure permission mode (`autonomous`, `ask`, `read_only`) |
+| `/api/claw/doctor` | `GET` | Preflight diagnostic health check report |
+| `/api/claw/status` | `GET` | Workspace path, git branch, modified files, memory files |
+| `/api/claw/diff` | `GET` | Git diff of uncommitted modifications |
+| `/api/claw/slash` | `POST` | Execute slash commands (`/doctor`, `/review`, `/diff`, `/commit`, `/init`) |
+| `/api/claw/workspace` | `POST` | Change or validate active workspace directory |
+| `/api/agent/stream` | `POST` | Real-time SSE streaming of agent reasoning, tool execution, and diffs |
+| `/api/agent/task` | `POST` | Run autonomous coding task end-to-end |
+| `/api/agent/tools` | `GET` | Catalog of 12+ native execution tools |
+| `/api/agent/permissions` | `GET/POST` | Inspect or update security gate mode (`autonomous`, `ask`, `read_only`) |
+| `/api/chat/stream` | `POST` | SSE streaming for multi-model collaborative chat |
+| `/api/health` | `GET` | Ollama connection, RAM metrics, and M2 settings |
+
+---
+
+## 🧪 Testing
+
+Run the full unified test suite:
+
+```bash
+python3 -m unittest discover -s backend/tests
+```
+
+All 13 unit tests validate:
+- Tool execution lifecycle (`read_file`, `write_file`, `edit_file`, `grep_search`, `glob_files`, `git_status`, `git_diff`, `todo_write`)
+- Security gate enforcement against destructive commands
+- Slash command registry (`/doctor`, `/status`, `/diff`, `/init`, `/help`, `/permissions`)
+- Autonomous multi-turn agent loop dispatch
+
+---
+
+## 📜 Canonical Rust Workspace
+
+The original Claw Code Rust implementation lives in `claw-code/rust`:
+```bash
+cd claw-code/rust
+cargo build --workspace
+./target/debug/claw doctor
+```
 
 ---
 
@@ -164,8 +227,12 @@ The SYNORA AI user interface will be live at:
 - [x] **v0.2**: Real Ollama server configuration, sequential M2 memory safeguards, unified collaborative synthesis.
 - [x] **v0.3**: Multi-turn conversation memory, intelligent multi-factor model selection, real-time performance monitoring.
 - [x] **v0.4**: Complete React + Vite + Tailwind CSS interface with live multi-model orchestration visualizer, streaming responses, conversation history, and model management.
-- [x] **v0.5**: **Claw Code Agent Engine Integration**: Native tool execution (`bash`, `edit_file`, `read_file`, `grep_search`, `glob_files`, `list_dir`), permission security gates, project memory context (`CLAUDE.md`/`AGENTS.md`), and real-time SSE agent streaming.
+- [x] **v0.5**: **Claw Code Autonomous Agent Harness Integration**:
+  - Full canonical Claw Code repository integrated in `claw-code/`
+  - Interactive CLI REPL (`./claw`) with colored output and slash commands
+  - Dedicated **Claw Code Studio** Web UI with real-time SSE streaming, collapsible tool execution cards, and diff inspection
+  - 12+ Native tools (`bash`, `read_file`, `write_file`, `edit_file`, `grep_search`, `glob_files`, `list_dir`, `git_status`, `git_diff`, `git_commit`, `web_fetch`, `todo_write`)
+  - Complete slash command engine (`/doctor`, `/review`, `/diff`, `/commit`, `/status`, `/init`, `/compact`, `/cost`, `/tools`, `/permissions`, `/model`, `/help`)
+  - Security gates with granular path protection and destructive command filtering
 - [ ] **v0.6**: ChromaDB vector store, semantic RAG search & document embeddings.
 - [ ] **v1.0**: Automated multi-stage testing, code execution sandbox, production deployment.
-
-

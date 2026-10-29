@@ -18,7 +18,7 @@ from backend.core.evaluator import evaluator, EvaluationMetric
 from backend.core.memory import memory
 from backend.core.monitor import monitor
 from backend.database.sqlite import save_chat_record, get_recent_history, get_session_history, get_all_sessions
-from backend.agent import tool_manager, permission_enforcer, agent_loop
+from backend.agent import tool_manager, permission_enforcer, agent_loop, slash_command_registry, context_loader
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -98,6 +98,13 @@ class AgentTaskRequest(BaseModel):
     model_id: Optional[str] = Field(default="qwen2.5-coder:7b", description="Model ID to execute agent loop")
     max_turns: int = Field(default=12, ge=1, le=30)
     workspace_root: Optional[str] = None
+
+class SlashCommandRequest(BaseModel):
+    command: str = Field(..., description="Slash command, e.g. /doctor, /status, /diff, /help")
+    workspace_root: Optional[str] = None
+
+class WorkspacePathRequest(BaseModel):
+    path: str = Field(..., description="Directory path to set as active workspace")
 
 class DirectToolExecuteRequest(BaseModel):
     tool_name: str
@@ -704,3 +711,63 @@ def update_permission_mode(req: PermissionModeRequest):
         "mode": permission_enforcer.mode
     }
 
+
+
+@app.post("/api/claw/slash")
+async def execute_slash_command(req: SlashCommandRequest):
+    """
+    Executes a Claw Code slash command (/doctor, /status, /diff, /review, /commit, /init, /help, etc.).
+    """
+    if req.workspace_root:
+        slash_command_registry.set_workspace_root(req.workspace_root)
+        tool_manager.set_workspace_root(req.workspace_root)
+    result = await slash_command_registry.execute(req.command)
+    return result.model_dump()
+
+@app.get("/api/claw/doctor")
+async def get_claw_doctor():
+    """
+    Runs preflight diagnostic doctor health check.
+    """
+    result = await slash_command_registry.cmd_doctor()
+    return result.model_dump()
+
+@app.get("/api/claw/status")
+async def get_claw_status():
+    """
+    Returns workspace status, git repository branch, memory files, and permissions.
+    """
+    result = await slash_command_registry.cmd_status()
+    git_res = await tool_manager.execute_git_status()
+    mem_files = context_loader.discover_memory_files()
+    return {
+        "workspace_root": str(tool_manager.workspace_root),
+        "permission_mode": permission_enforcer.mode,
+        "git_status": git_res.output,
+        "memory_files": mem_files,
+        "status_output": result.output
+    }
+
+@app.get("/api/claw/diff")
+async def get_claw_diff(path: Optional[str] = None):
+    """
+    Returns workspace git diff.
+    """
+    result = await tool_manager.execute_git_diff(path=path)
+    return result.model_dump()
+
+@app.post("/api/claw/workspace")
+async def set_claw_workspace(req: WorkspacePathRequest):
+    """
+    Sets active workspace directory for Claw Code agent.
+    """
+    p = Path(req.path).resolve()
+    if not p.exists() or not p.is_dir():
+        raise HTTPException(status_code=400, detail=f"Directory does not exist: {req.path}")
+    tool_manager.set_workspace_root(str(p))
+    context_loader.set_workspace_root(str(p))
+    slash_command_registry.set_workspace_root(str(p))
+    return {
+        "success": True,
+        "workspace_root": str(p)
+    }

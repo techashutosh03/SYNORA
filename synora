@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+import sys
+import os
+import subprocess
+from pathlib import Path
+
+root = Path(__file__).resolve().parent
+
+if len(sys.argv) > 1 and sys.argv[1] in ("claw", "agent"):
+    # Delegate to Claw Code CLI
+    sys.path.insert(0, str(root))
+    from backend.agent.cli import main
+    sys.argv.pop(1)
+    main()
+else:
+    # Run uvicorn server
+    print("🚀 Launching SYNORA AI Multi-Model Server with Claw Code Engine...")
+    cmd = [sys.executable, "-m", "uvicorn", "backend.main:app", "--reload", "--port", "8000"]
+    subprocess.run(cmd, cwd=str(root))

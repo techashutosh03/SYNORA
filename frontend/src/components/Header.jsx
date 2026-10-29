@@ -8,7 +8,9 @@ import {
   CheckCircle2, 
   AlertCircle,
   HelpCircle,
-  Radio
+  Radio,
+  Terminal,
+  MessageSquare
 } from 'lucide-react';
 import SynoraLogo from './SynoraLogo';
 
@@ -23,6 +25,8 @@ export default function Header({
   onToggleSimulation,
   activeModelsCount = 3,
   latestMetrics,
+  currentView = 'chat',
+  setCurrentView,
 }) {
   const isSimulated = Boolean(settings?.allow_simulation);
   const ollamaStatus = health?.ollama?.status;
@@ -44,9 +48,37 @@ export default function Header({
         <SynoraLogo size="sm" showTagline={true} />
       </div>
 
-      {/* Center: System Status & Pipeline Info */}
-      <div className="hidden lg:flex items-center gap-3">
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 border border-slate-700/60 text-xs">
+      {/* Center: Dual Mode Switcher (SYNORA Chat vs Claw Code Studio) */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center bg-slate-900/90 border border-slate-800 rounded-xl p-1 shadow-inner">
+          <button
+            onClick={() => setCurrentView?.('chat')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+              currentView === 'chat'
+                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="Multi-Model Collaborative Chat"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">SYNORA Chat</span>
+          </button>
+          <button
+            onClick={() => setCurrentView?.('claw')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+              currentView === 'claw'
+                ? 'bg-gradient-to-r from-purple-600 to-cyan-500 text-white shadow-md shadow-purple-900/30'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="Claw Code Autonomous Coding Harness"
+          >
+            <Terminal className="w-3.5 h-3.5 text-cyan-300" />
+            <span className="font-semibold">Claw Code Studio</span>
+          </button>
+        </div>
+
+        {/* System Status Indicator */}
+        <div className="hidden xl:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/60 border border-slate-800 text-[11px]">
           <span className="relative flex h-2 w-2">
             <span
               className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
@@ -60,21 +92,8 @@ export default function Header({
             />
           </span>
 
-          <span className="text-slate-300 font-medium">
-            {isOllamaConnected ? (
-              <span className="text-emerald-400">Ollama Ready</span>
-            ) : isSimulated ? (
-              <span className="text-amber-400">Simulation / Dev Mode</span>
-            ) : (
-              <span className="text-rose-400">Ollama Awaiting Models</span>
-            )}
-          </span>
-
-          <span className="text-slate-600">|</span>
-
-          <span className="text-slate-400 flex items-center gap-1 font-mono text-[11px]">
-            <Cpu className="w-3.5 h-3.5 text-purple-400" />
-            16GB M2 Safe (1-at-a-time)
+          <span className="text-slate-300 font-medium font-mono">
+            {isOllamaConnected ? 'Ollama Ready' : isSimulated ? 'Sim / Dev Mode' : 'Ollama Offline'}
           </span>
         </div>
       </div>
@@ -93,7 +112,7 @@ export default function Header({
           id="btn-toggle-simulation"
         >
           <Zap className={`w-3.5 h-3.5 ${isSimulated ? 'text-amber-400 fill-amber-400/20' : 'text-slate-400'}`} />
-          <span>{isSimulated ? 'Sim Mode: ON' : 'Sim Mode: OFF'}</span>
+          <span className="hidden sm:inline">{isSimulated ? 'Sim: ON' : 'Sim: OFF'}</span>
         </button>
 
         {/* Model Activity Button */}
@@ -108,7 +127,7 @@ export default function Header({
           id="btn-model-activity"
         >
           <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-          <span className="hidden sm:inline">Model Activity</span>
+          <span className="hidden sm:inline">Activity</span>
         </button>
 
         {/* Settings Button */}
