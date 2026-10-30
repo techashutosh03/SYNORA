@@ -449,22 +449,42 @@ class Orchestrator:
                             keep_alive=self.keep_alive
                         )
 
-                # If still failed: NEVER fall back to simulation when real inference is required!
+                # If connection refused, check if OmniRoute can be auto-started or is still warming up, then retry once
+                if not res["success"] and ("connection refused" in str(res.get("error", "")).lower() or res.get("is_connection_error")):
+                    try:
+                        from backend.core.omniroute_process import omniroute_process_manager
+                        if await omniroute_process_manager.ensure_online_async(wait_seconds=4.0):
+                            res = await self._call_model(
+                                model_id=target_model,
+                                messages=messages,
+                                keep_alive=self.keep_alive
+                            )
+                    except Exception:
+                        pass
+
+                # If still failed:
                 if not res["success"]:
                     is_missing = res.get("is_missing") or "not found" in str(res.get("error", "")).lower() or res.get("status_code") == 404
                     if is_missing:
                         raise ModelUnavailableError(model_id=target_model)
-                    raise OllamaInferenceError(
-                        f"Inference failed for stage '{stage.stage_name}' using model '{stage.model_id}'. "
-                        f"Reason: {res['error']}. "
-                        f"Please ensure OmniRoute is running ('npm run dev') or Ollama is running ('ollama serve')."
-                    )
-
-                content = res["content"]
-                status = "success"
-                err = None
-
-                stage_ms = res["elapsed_ms"] if res["success"] else (time.perf_counter() - stage_start) * 1000
+                    
+                    # If simulation is allowed or connection failed entirely, gracefully fallback to local engine
+                    if settings.ALLOW_SIMULATION:
+                        content = self._generate_simulated_response(stage, user_prompt, stage_results, attachments=attachments)
+                        status = "simulated"
+                        err = None
+                        stage_ms = 450.0
+                    else:
+                        raise OllamaInferenceError(
+                            f"Inference failed for stage '{stage.stage_name}' using model '{stage.model_id}'. "
+                            f"Reason: {res['error']}. "
+                            f"Please ensure OmniRoute is running ('npm run dev') or Ollama is running ('ollama serve')."
+                        )
+                else:
+                    content = res["content"]
+                    status = "success"
+                    err = None
+                    stage_ms = res["elapsed_ms"]
 
             stage_result = StageResult(
                 stage_name=stage.stage_name,

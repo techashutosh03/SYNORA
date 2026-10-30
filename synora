@@ -76,6 +76,11 @@ def run_all():
 
 def run_backend():
     print(f"{GREEN}🚀 Starting SYNORA FastAPI Backend on port 8000...{RESET}")
+    try:
+        from backend.core.omniroute_process import omniroute_process_manager
+        omniroute_process_manager.start_background(wait_seconds=15.0)
+    except Exception as e:
+        print(f"{YELLOW}⚠️ Could not auto-check OmniRoute: {e}{RESET}")
     cmd = [sys.executable, "-m", "uvicorn", "backend.main:app", "--port", "8000", "--reload"]
     subprocess.run(cmd, cwd=str(root))
 
@@ -90,6 +95,11 @@ def run_frontend():
     subprocess.run(cmd, cwd=str(root / "frontend"))
 
 def run_claw():
+    try:
+        from backend.core.omniroute_process import omniroute_process_manager
+        omniroute_process_manager.start_background(wait_seconds=15.0)
+    except Exception:
+        pass
     from backend.agent.cli import main
     sys.argv.pop(1)
     main()

@@ -12,6 +12,7 @@ class Settings(BaseModel):
     OMNIROUTE_ENABLED: bool = os.getenv("OMNIROUTE_ENABLED", "true").lower() == "true"
     OMNIROUTE_TIMEOUT_SECONDS: float = float(os.getenv("OMNIROUTE_TIMEOUT_SECONDS", "300.0"))
     OMNIROUTE_FALLBACK_TO_OLLAMA: bool = os.getenv("OMNIROUTE_FALLBACK_TO_OLLAMA", "true").lower() == "true"
+    OMNIROUTE_AUTO_START: bool = os.getenv("SYNORA_AUTO_START_OMNIROUTE", "true").lower() == "true"
 
     # Routing & Provider Strategy ("auto", "omniroute", "ollama", "hybrid")
     DEFAULT_PROVIDER: str = os.getenv("SYNORA_DEFAULT_PROVIDER", "auto")

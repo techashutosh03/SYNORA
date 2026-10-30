@@ -2,6 +2,7 @@ import time
 import uuid
 import json
 import asyncio
+from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -17,13 +18,24 @@ from backend.core.synthesizer import synthesizer, SynthesisInsight, SynthesisRes
 from backend.core.evaluator import evaluator, EvaluationMetric
 from backend.core.memory import memory
 from backend.core.monitor import monitor
+from backend.core.omniroute_process import omniroute_process_manager
 from backend.database.sqlite import save_chat_record, get_recent_history, get_session_history, get_all_sessions
 from backend.agent import tool_manager, permission_enforcer, agent_loop, slash_command_registry, context_loader
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Auto-ensure OmniRoute is running when SYNORA starts
+    if settings.OMNIROUTE_ENABLED and settings.OMNIROUTE_AUTO_START:
+        asyncio.create_task(omniroute_process_manager.ensure_online_async(wait_seconds=20.0))
+    yield
+    # Cleanup on shutdown
+    omniroute_process_manager.stop_if_managed()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="SYNORA AI: Many Minds. One Intelligence. Unified multi-model AI system."
+    description="SYNORA AI: Many Minds. One Intelligence. Unified multi-model AI system.",
+    lifespan=lifespan
 )
 
 # Enable CORS for frontend integration
