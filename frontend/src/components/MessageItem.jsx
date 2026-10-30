@@ -40,15 +40,21 @@ function safeString(val) {
 }
 
 /**
- * CodeBlock with syntax language pill and copy button
+ * CodeBlock with syntax language pill and copy button.
+ * Correctly distinguishes block code from inline code in react-markdown v10
+ * to prevent DOM nesting violations (e.g. <div> inside <p> or <pre>).
  */
-function CodeBlock({ node, inline, className, children, ...props }) {
+function CodeBlock({ node, className, children, ...props }) {
   const [copied, setCopied] = useState(false);
   const match = /language-(\w+)/.exec(className || '');
   const language = match ? match[1] : '';
   const codeContent = String(children || '').replace(/\n$/, '');
 
-  if (inline) {
+  // In react-markdown v10, 'inline' prop is omitted.
+  // Block code is identified by having a language class OR multiline content.
+  const isBlock = Boolean(match || String(children || '').includes('\n'));
+
+  if (!isBlock) {
     return (
       <code className="bg-purple-950/40 text-purple-200 border border-purple-500/20 px-1.5 py-0.5 rounded text-[13px] font-mono" {...props}>
         {children}
@@ -347,6 +353,9 @@ export default function MessageItem({ message }) {
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
+              pre({ children }) {
+                return <>{children}</>;
+              },
               code: CodeBlock,
             }}
           >
