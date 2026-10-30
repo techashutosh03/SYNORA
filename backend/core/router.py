@@ -2,6 +2,7 @@ import re
 import time
 from typing import List, Dict, Any, Optional, Set
 from pydantic import BaseModel, Field
+from backend.config import settings
 from backend.models.registry import model_registry, ModelProfile
 from backend.core.orchestrator import OrchestrationPlan, StageConfig
 from backend.core.model_availability import (

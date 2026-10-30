@@ -57,8 +57,18 @@ def run_all():
     print(f"{CYAN}🚀 Launching complete SYNORA AI + OmniRoute ecosystem...{RESET}")
     print(f"  • {BOLD}OmniRoute Gateway:{RESET} http://localhost:20128/v1 (376 AI Providers)")
     print(f"  • {BOLD}SYNORA Backend:{RESET}    http://localhost:8000 (FastAPI Orchestrator)")
+    print(f"  • {BOLD}Claw Code Harness:{RESET} Active (12 autonomous tools & Studio)")
     print(f"  • {BOLD}SYNORA Web UI:{RESET}     http://localhost:5173 (Chat & Claw Studio)")
     print(f"{DIM}Press Ctrl+C to stop all services cleanly.{RESET}\n")
+
+    # Ensure OmniRoute is online or already pre-warmed
+    try:
+        from backend.core.omniroute_process import omniroute_process_manager
+        if not omniroute_process_manager.is_listening():
+            print(f"{CYAN}⚡ Pre-warming OmniRoute AI Gateway on port 20128...{RESET}")
+            omniroute_process_manager.start_background(wait_seconds=6.0)
+    except Exception as e:
+        pass
 
     cmd = [
         "npx", "--yes", "concurrently",

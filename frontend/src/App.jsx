@@ -41,10 +41,16 @@ export default function App() {
 
   const chatAbortControllerRef = useRef(null);
 
-  // Load initial system data
+  // Load initial system data & periodic health heartbeat
   useEffect(() => {
     refreshAllData();
+    const interval = setInterval(() => {
+      fetchHealth().then(h => {
+        if (h) setHealth(h);
+      }).catch(() => null);
+    }, 5000);
     return () => {
+      clearInterval(interval);
       if (chatAbortControllerRef.current) {
         chatAbortControllerRef.current.abort();
       }

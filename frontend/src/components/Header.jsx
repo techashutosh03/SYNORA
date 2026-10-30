@@ -78,30 +78,44 @@ export default function Header({
           </button>
         </div>
 
-        {/* System Status Indicator */}
-        <div className="hidden xl:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/60 border border-slate-800 text-[11px]">
-          <span className="relative flex h-2 w-2">
-            <span
-              className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                isOmniRouteConnected ? 'bg-cyan-400' : isOllamaConnected ? 'bg-emerald-400' : isSimulated ? 'bg-amber-400' : 'bg-rose-400'
-              }`}
-            />
-            <span
-              className={`relative inline-flex rounded-full h-2 w-2 ${
-                isOmniRouteConnected ? 'bg-cyan-500' : isOllamaConnected ? 'bg-emerald-500' : isSimulated ? 'bg-amber-500' : 'bg-rose-500'
-              }`}
-            />
-          </span>
+        {/* Dual Live Status Indicators: OmniRoute 376 & Claw Code */}
+        <div className="hidden lg:flex items-center gap-2">
+          {/* OmniRoute Status Pill */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-mono transition-all ${
+              isOmniRouteConnected
+                ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300'
+                : 'bg-slate-900/60 border-slate-800 text-slate-400'
+            }`}
+            title="OmniRoute AI Proxy Gateway with 376 LLM Providers and auto-fallbacks"
+          >
+            <span className="relative flex h-2 w-2">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  isOmniRouteConnected ? 'bg-cyan-400' : 'bg-amber-400'
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  isOmniRouteConnected ? 'bg-cyan-500' : 'bg-amber-500'
+                }`}
+              />
+            </span>
+            <span>⚡ OmniRoute: {isOmniRouteConnected ? `Online (${health?.omniroute?.models_count || 455})` : 'Connecting...'}</span>
+          </div>
 
-          <span className="text-slate-300 font-medium font-mono">
-            {isOmniRouteConnected
-              ? `OmniRoute 376 Ready (${health?.omniroute?.models_count || 0})`
-              : isOllamaConnected
-              ? 'Ollama Ready'
-              : isSimulated
-              ? 'Sim / Dev Mode'
-              : 'Gateway Offline'}
-          </span>
+          {/* Claw Code Status Pill */}
+          <div
+            onClick={() => setCurrentView?.('claw')}
+            className="cursor-pointer flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-300 text-[11px] font-mono hover:bg-purple-500/20 transition-all"
+            title="Claw Code Autonomous Coding Harness & 12 Native Tools"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            <span>🦞 Claw Code: Active ({health?.claw_code?.tools_count || 12} Tools)</span>
+          </div>
         </div>
       </div>
 

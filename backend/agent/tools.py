@@ -308,6 +308,10 @@ class ToolManager:
             }
         ]
 
+    def list_tools(self) -> List[str]:
+        """Returns the list of tool names available in Claw Code."""
+        return [t["function"]["name"] for t in self.get_tool_definitions()]
+
     # --- Tool Implementations ---
 
     async def execute_bash(self, command: str, timeout_seconds: int = 60) -> ToolResult:

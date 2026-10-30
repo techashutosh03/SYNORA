@@ -117,6 +117,61 @@ class ModelRegistry:
                 provider="omniroute"
             ),
             ModelProfile(
+                id="ddgw/claude-haiku-4-5",
+                name="Anthropic Claude 4.5 Haiku (OmniRoute)",
+                family="Claude",
+                parameters="Cloud Flagship",
+                specialties=["synthesis", "conversational", "reality-check", "analysis", "uncensored"],
+                recommended_role="synthesizer",
+                context_window=200000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="ddgw/gpt-5.4-mini",
+                name="OpenAI GPT 5.4 Mini (OmniRoute)",
+                family="OpenAI",
+                parameters="Cloud Flagship",
+                specialties=["coding", "refactoring", "fast-reasoning", "general"],
+                recommended_role="specialist",
+                context_window=128000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="ddgw/mistral-small-2603",
+                name="Mistral Small (OmniRoute)",
+                family="Mistral",
+                parameters="Cloud Flagship",
+                specialties=["reviewer", "reasoning", "logic-audit", "general"],
+                recommended_role="reviewer",
+                context_window=128000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="ddgw/tinfoil/gpt-oss-120b",
+                name="Open-Source 120B Reasoning (OmniRoute)",
+                family="DeepSeek/OSS",
+                parameters="120B",
+                specialties=["deep-reasoning", "analysis", "synthesis"],
+                recommended_role="synthesizer",
+                context_window=128000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
+                id="ddgw/tinfoil/gemma4-31b",
+                name="Google Gemma 4 31B (OmniRoute)",
+                family="Google",
+                parameters="31B",
+                specialties=["general", "knowledge", "multimodal"],
+                recommended_role="specialist",
+                context_window=128000,
+                tier=0,
+                provider="omniroute"
+            ),
+            ModelProfile(
                 id="omniroute-auto",
                 name="OmniRoute Auto-Combo Router",
                 family="OmniRoute",

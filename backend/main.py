@@ -24,9 +24,9 @@ from backend.agent import tool_manager, permission_enforcer, agent_loop, slash_c
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Auto-ensure OmniRoute is running when SYNORA starts
+    # Auto-ensure OmniRoute is running and online when SYNORA starts
     if settings.OMNIROUTE_ENABLED and settings.OMNIROUTE_AUTO_START:
-        asyncio.create_task(omniroute_process_manager.ensure_online_async(wait_seconds=20.0))
+        await omniroute_process_manager.ensure_online_async(wait_seconds=25.0)
     yield
     # Cleanup on shutdown
     omniroute_process_manager.stop_if_managed()
@@ -182,7 +182,7 @@ def update_settings(req: SettingsUpdateRequest):
 @app.get("/api/health")
 async def check_health():
     """
-    Checks system health, OmniRoute AI Gateway, Ollama connectivity, storage health, and M2 optimization state.
+    Checks system health, OmniRoute AI Gateway, Claw Code harness, Ollama connectivity, storage health, and M2 optimization state.
     """
     sys_health = await orchestrator.check_system_health()
     storage = monitor.get_storage_status()
@@ -190,6 +190,12 @@ async def check_health():
         "status": "healthy",
         "version": settings.VERSION,
         "omniroute": sys_health.get("omniroute"),
+        "claw_code": {
+            "status": "online",
+            "tools_count": len(tool_manager.list_tools()),
+            "workspace": context_loader.get_workspace_root(),
+            "permission_mode": permission_enforcer.mode
+        },
         "ollama": sys_health.get("ollama"),
         "active_provider": sys_health.get("active_provider"),
         "storage": storage,

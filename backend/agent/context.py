@@ -16,6 +16,9 @@ class ProjectContextLoader:
     def set_workspace_root(self, path: str):
         self.workspace_root = Path(path).resolve()
 
+    def get_workspace_root(self) -> str:
+        return str(self.workspace_root)
+
     def discover_memory_files(self) -> List[Dict[str, Any]]:
         found = []
         for fname in self.MEMORY_FILENAMES:
