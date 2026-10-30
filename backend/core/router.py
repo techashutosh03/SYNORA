@@ -193,6 +193,7 @@ class Router:
                 "sub_domain": "unvarnished_truth",
                 "complexity": "medium",
                 "is_follow_up": is_follow_up,
+                "confidence": 0.98,
                 "domain_scores": {"reality_check": 10.0},
                 "is_agentic_task": False
             }

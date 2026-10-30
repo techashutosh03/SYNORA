@@ -46,6 +46,13 @@ class TestConversationalEngine(unittest.TestCase):
         self.assertIn("Raw Truth", resp)
         self.assertIn("Playbook", resp)
 
+    def test_reality_check_routing(self):
+        import asyncio
+        from backend.core.router import router
+        decision = asyncio.run(router.route("give me the reality check on tech careers", simulate=True))
+        self.assertEqual(decision.task_type, "reality_check")
+        self.assertTrue(decision.confidence > 0.9)
+
     def test_attachment_analysis_markdown(self):
         att = [{
             "name": "README.md",
