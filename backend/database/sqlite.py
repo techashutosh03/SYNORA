@@ -58,6 +58,17 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_approval_session ON pending_approvals(session_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_approval_status ON pending_approvals(status)")
 
+    cursor.execute("PRAGMA table_info(pending_approvals)")
+    pa_cols = {row[1] for row in cursor.fetchall()}
+    if "user_id" not in pa_cols:
+        cursor.execute("ALTER TABLE pending_approvals ADD COLUMN user_id TEXT DEFAULT 'default_user'")
+    if "workspace_root" not in pa_cols:
+        cursor.execute("ALTER TABLE pending_approvals ADD COLUMN workspace_root TEXT DEFAULT '.'")
+    if "diff_preview" not in pa_cols:
+        cursor.execute("ALTER TABLE pending_approvals ADD COLUMN diff_preview TEXT")
+    if "command_preview" not in pa_cols:
+        cursor.execute("ALTER TABLE pending_approvals ADD COLUMN command_preview TEXT")
+
     # Routing telemetry table to measure routing accuracy and track overrides
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS routing_telemetry (
@@ -69,10 +80,19 @@ def init_db():
             reason TEXT,
             user_override TEXT,
             is_correct INTEGER DEFAULT 1,
+            feedback_weight REAL DEFAULT 1.0,
+            feedback_timestamp DATETIME,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_routing_session ON routing_telemetry(session_id)")
+
+    cursor.execute("PRAGMA table_info(routing_telemetry)")
+    rt_cols = {row[1] for row in cursor.fetchall()}
+    if "feedback_weight" not in rt_cols:
+        cursor.execute("ALTER TABLE routing_telemetry ADD COLUMN feedback_weight REAL DEFAULT 1.0")
+    if "feedback_timestamp" not in rt_cols:
+        cursor.execute("ALTER TABLE routing_telemetry ADD COLUMN feedback_timestamp DATETIME")
 
     # Model tool-calling success rate metrics
     cursor.execute("""
@@ -87,6 +107,38 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+# -------------------------------------------------------------
+# Sensitive Data Redaction
+# -------------------------------------------------------------
+
+SENSITIVE_PATTERNS = [
+    (r"(Bearer\s+)[A-Za-z0-9_\-\.]{15,}", r"\1[REDACTED]"),
+    (r"(sk-[a-zA-Z0-9_\-]{15,})", r"[REDACTED_API_KEY]"),
+    (r"(ghp_[a-zA-Z0-9]{20,})", r"[REDACTED_GITHUB_TOKEN]"),
+    (r"(\b(?:password|passwd|secret|api_key|token)\s*[:=]\s*['\"])[^'\"]+(['\"])", r"\1[REDACTED]\2"),
+    (r"-----BEGIN [A-Z ]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+ PRIVATE KEY-----", r"[PRIVATE_KEY_REDACTED]")
+]
+
+def redact_sensitive_data(text: str) -> str:
+    """Sanitizes text by masking API keys, bearer tokens, passwords, and private keys."""
+    if not text or not isinstance(text, str):
+        return text
+    import re
+    sanitized = text
+    for pattern, replacement in SENSITIVE_PATTERNS:
+        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+    return sanitized
+
+def redact_sensitive_object(obj: Any) -> Any:
+    """Recursively redacts sensitive patterns across dicts, lists, and primitives."""
+    if isinstance(obj, str):
+        return redact_sensitive_data(obj)
+    elif isinstance(obj, dict):
+        return {k: redact_sensitive_object(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [redact_sensitive_object(item) for item in obj]
+    return obj
 
 def save_chat_record(
     user_prompt: str,
@@ -108,6 +160,11 @@ def save_chat_record(
     cursor.execute("SELECT COUNT(*) FROM chat_history WHERE session_id = ?", (sid,))
     turn_index = cursor.fetchone()[0]
 
+    # Pre-storage redaction to prevent accidental credential leakage in persistent SQLite
+    clean_prompt = redact_sensitive_data(user_prompt)
+    clean_response = redact_sensitive_data(final_response)
+    clean_trace = redact_sensitive_object(orchestration_trace)
+
     cursor.execute("""
         INSERT INTO chat_history (
             session_id, turn_index, user_prompt, final_response, task_type, complexity, models_used, total_time_ms, memory_rss_mb, orchestration_trace
@@ -115,14 +172,14 @@ def save_chat_record(
     """, (
         sid,
         turn_index,
-        user_prompt,
-        final_response,
+        clean_prompt,
+        clean_response,
         task_type,
         complexity,
         json.dumps(models_used),
         total_time_ms,
         memory_rss_mb,
-        json.dumps(orchestration_trace)
+        json.dumps(clean_trace)
     ))
     record_id = cursor.lastrowid
     conn.commit()
@@ -317,12 +374,15 @@ def record_routing_telemetry(
 ) -> int:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
+    # Pre-storage redaction to prevent secret/PII persistence in telemetry
+    clean_prompt = redact_sensitive_data(prompt)
+    clean_reason = redact_sensitive_data(reason)
     cursor.execute("""
         INSERT INTO routing_telemetry (
-            session_id, prompt, selected_workflow, confidence, reason, user_override, is_correct
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            session_id, prompt, selected_workflow, confidence, reason, user_override, is_correct, feedback_weight
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1.0)
     """, (
-        session_id, prompt, selected_workflow, confidence, reason, user_override,
+        session_id, clean_prompt, selected_workflow, confidence, clean_reason, user_override,
         0 if user_override and user_override != selected_workflow else 1
     ))
     rec_id = cursor.lastrowid
@@ -330,47 +390,72 @@ def record_routing_telemetry(
     conn.close()
     return rec_id
 
-def update_routing_feedback(session_id: str, user_override: Optional[str], is_correct: bool = True) -> bool:
+def update_routing_feedback(
+    session_id: str,
+    user_override: Optional[str],
+    is_correct: bool = True,
+    feedback_weight: float = 0.85
+) -> bool:
+    """
+    Treats user feedback as an informative signal rather than absolute uncalibrated truth.
+    Stores feedback_weight (default 0.85) to calibrate confidence metrics.
+    """
     conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE routing_telemetry
-        SET user_override = ?, is_correct = ?
-        WHERE session_id = ?
-    """, (user_override, 1 if is_correct else 0, session_id))
-    changed = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
-    return changed
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE routing_telemetry
+            SET user_override = ?, is_correct = ?, feedback_weight = ?, feedback_timestamp = CURRENT_TIMESTAMP
+            WHERE session_id = ?
+        """, (user_override, 1 if is_correct else 0, feedback_weight, session_id))
+        changed = cursor.rowcount > 0
+        conn.commit()
+        return changed
+    finally:
+        conn.close()
 
 def get_routing_accuracy_metrics() -> Dict[str, Any]:
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*), SUM(is_correct) FROM routing_telemetry")
-    total, correct = cursor.fetchone()
-    total = total or 0
-    correct = correct or 0
+    cursor.execute("""
+        SELECT COUNT(*), SUM(is_correct),
+               SUM(is_correct * COALESCE(feedback_weight, 1.0)),
+               SUM(COALESCE(feedback_weight, 1.0))
+        FROM routing_telemetry
+    """)
+    row = cursor.fetchone()
+    total = row[0] or 0
+    correct = row[1] or 0
+    weighted_correct = row[2] or 0.0
+    weighted_total = row[3] or 0.0
 
     cursor.execute("""
-        SELECT selected_workflow, COUNT(*) as cnt, SUM(is_correct) as correct_cnt
+        SELECT selected_workflow, COUNT(*) as cnt, SUM(is_correct) as correct_cnt,
+               SUM(is_correct * COALESCE(feedback_weight, 1.0)) as w_correct,
+               SUM(COALESCE(feedback_weight, 1.0)) as w_total
         FROM routing_telemetry
         GROUP BY selected_workflow
     """)
     workflow_stats = {}
-    for wf, cnt, c_cnt in cursor.fetchall():
+    for wf, cnt, c_cnt, w_c, w_t in cursor.fetchall():
         c_cnt = c_cnt or 0
+        w_c = w_c or 0.0
+        w_t = w_t or 1.0
         workflow_stats[wf] = {
             "total": cnt,
             "correct": c_cnt,
-            "accuracy": round((c_cnt / cnt) * 100, 2) if cnt > 0 else 100.0
+            "accuracy": round((c_cnt / cnt) * 100, 2) if cnt > 0 else 100.0,
+            "weighted_accuracy": round((w_c / w_t) * 100, 2) if w_t > 0 else 100.0
         }
 
     conn.close()
     overall_acc = round((correct / total) * 100, 2) if total > 0 else 100.0
+    weighted_acc = round((weighted_correct / weighted_total) * 100, 2) if weighted_total > 0 else 100.0
     return {
         "total_routes_recorded": total,
         "correct_routes": correct,
         "overall_accuracy_pct": overall_acc,
+        "weighted_accuracy_pct": weighted_acc,
         "workflows": workflow_stats
     }
 
@@ -423,25 +508,81 @@ def get_model_tool_stats(model_id: Optional[str] = None) -> Dict[str, Any]:
     }
 
 # -------------------------------------------------------------
-# Sensitive Data Redaction
+# Data Retention & Privacy Management
 # -------------------------------------------------------------
 
-SENSITIVE_PATTERNS = [
-    (r"(Bearer\s+)[A-Za-z0-9_\-\.]{15,}", r"\1[REDACTED]"),
-    (r"(sk-[a-zA-Z0-9_\-]{15,})", r"[REDACTED_API_KEY]"),
-    (r"(ghp_[a-zA-Z0-9]{20,})", r"[REDACTED_GITHUB_TOKEN]"),
-    (r"(\b(?:password|passwd|secret|api_key|token)\s*[:=]\s*['\"])[^'\"]+(['\"])", r"\1[REDACTED]\2"),
-    (r"-----BEGIN [A-Z ]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+ PRIVATE KEY-----", r"[PRIVATE_KEY_REDACTED]")
-]
+def prune_chat_history(retention_days: int = 30, max_records: Optional[int] = 1000) -> int:
+    """
+    Prunes chat history older than retention_days or beyond max_records limit.
+    Prevents persistent database bloat and enforces privacy data minimization.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    deleted_count = 0
 
-def redact_sensitive_data(text: str) -> str:
-    """Sanitizes text by masking API keys, bearer tokens, passwords, and private keys."""
-    if not text or not isinstance(text, str):
-        return text
-    import re
-    sanitized = text
-    for pattern, replacement in SENSITIVE_PATTERNS:
-        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
-    return sanitized
+    # 1. Prune by retention days
+    cursor.execute("""
+        DELETE FROM chat_history
+        WHERE timestamp < datetime('now', '-' || ? || ' days')
+    """, (retention_days,))
+    deleted_count += cursor.rowcount
+
+    # 2. Prune by max_records (keep newest max_records)
+    if max_records and max_records > 0:
+        cursor.execute("""
+            DELETE FROM chat_history
+            WHERE id NOT IN (
+                SELECT id FROM chat_history ORDER BY id DESC LIMIT ?
+            )
+        """, (max_records,))
+        deleted_count += cursor.rowcount
+
+    conn.commit()
+    conn.close()
+    return deleted_count
+
+def prune_old_telemetry(retention_days: int = 30, max_records: Optional[int] = 5000) -> int:
+    """
+    Prunes routing telemetry older than retention_days or beyond max_records limit.
+    Ensures user prompt telemetry is not retained indefinitely.
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    deleted_count = 0
+
+    cursor.execute("""
+        DELETE FROM routing_telemetry
+        WHERE timestamp < datetime('now', '-' || ? || ' days')
+    """, (retention_days,))
+    deleted_count += cursor.rowcount
+
+    if max_records and max_records > 0:
+        cursor.execute("""
+            DELETE FROM routing_telemetry
+            WHERE id NOT IN (
+                SELECT id FROM routing_telemetry ORDER BY id DESC LIMIT ?
+            )
+        """, (max_records,))
+        deleted_count += cursor.rowcount
+
+    conn.commit()
+    conn.close()
+    return deleted_count
+
+def prune_expired_approvals() -> int:
+    """Marks pending approvals whose expires_at epoch timestamp has passed as expired."""
+    import time
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    now = time.time()
+    cursor.execute("""
+        UPDATE pending_approvals
+        SET status = 'expired'
+        WHERE status = 'pending' AND expires_at < ?
+    """, (now,))
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return count
 
 init_db()

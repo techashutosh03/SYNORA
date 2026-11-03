@@ -4,6 +4,7 @@
 /output/
 .slim/deepwork/
 .omnivscodeagent/
+.omniroute-data/
 omnirouteCloud/
 omnirouteSite/
 _cache/
@@ -18,10 +19,12 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-venv/
-.venv/
-ENV/
+/env/
+/venv/
+/.venv/
+/ENV/
+!src/lib/env/
+!src/lib/env/**
 *.egg-info/
 *.egg
 *.db

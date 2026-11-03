@@ -39,8 +39,9 @@ class WorkflowDecision(BaseModel):
 AMBIGUOUS_PATTERNS = [
     # English
     r"^(?:please\s+)?(?:fix|debug|solve|repair)\s+(?:it|this|that|the\s+bug|the\s+issue|the\s+error)$",
-    r"^(?:why\s+is\s+it\s+(?:failing|broken|crashing)|why\s+it\s+fails)$",
-    r"^(?:make\s+it\s+work|it\s+doesn'?t\s+work|it\s+is\s+broken|it\s+failed)$",
+    r"^(?:why\s+is\s+it\s+(?:failing|broken|crashing)|why\s+it\s+fails|why\s+does\s+it\s+fail)$",
+    r"^(?:please\s+)?(?:make\s+it\s+work|it\s+doesn'?t\s+work|it\s+is\s+broken|it\s+failed)(?:\s+please)?$",
+    r"^it\s+(?:crashed|broke|failed)(?:\s+again)?$",
     r"^(?:help\s+me|help\s+with\s+this|fix\s+code|debug\s+code)$",
     r"^(?:run\s+it|test\s+it|execute\s+it)$",
     r"^(?:update\s+it|change\s+it|modify\s+it)$",
@@ -48,6 +49,12 @@ AMBIGUOUS_PATTERNS = [
     r"^(?:isko\s+|ye\s+)?(?:theek|sahi|fix)\s+(?:karo|kar\s+do|kar\s+de)$",
     r"^(?:chal\s+nahi\s+raha|chal\s+nahi\s+raha\s+hai|kaam\s+nahi\s+kar\s+raha)$",
     r"^(?:kya\s+dikkat\s+hai|kya\s+problem\s+hai|kya\s+error\s+hai)$",
+    # Spanish
+    r"^(?:por\s+favor\s+)?(?:arregla|repara|corrige)\s+(?:esto|eso|el\s+error|el\s+bug|el\s+fallo)$",
+    r"^(?:no\s+funciona|est[aá]\s+roto|fall[oó]|ayuda(?:\s+con\s+esto)?)$",
+    # French
+    r"^(?:s'il\s+vous\s+pla[iî]t\s+)?(?:r[eé]pare|corrige)\s+(?:[cç]a|ceci|le\s+bug|le\s+probl[eè]me)$",
+    r"^(?:[cç]a\s+ne\s+marche\s+pas|[cç]a\s+ne\s+fonctionne\s+pas|c'est\s+cass[eé]|aidez-moi)$",
 ]
 
 # Explanatory & conceptual markers (route to Chat)
@@ -55,13 +62,13 @@ EXPLANATION_INDICATORS = [
     # English
     "explain", "what is", "what does", "how does", "teach me", "walk me through",
     "overview", "difference between", "why does", "pros and cons", "how to write",
-    "concept of", "understand", "meaning of", "clarify", "review",
+    "concept of", "understand", "meaning of", "clarify", "review", "compare",
     # Hindi / Hinglish
     "explain karo", "samjhao", "samjha do", "kya karta hai", "kaise kaam karta hai",
-    "batao", "bataiye", "iska matlab kya hai",
+    "batao", "bataiye", "iska matlab kya hai", "kya hota hai",
     # Spanish / French
-    "explica", "como funciona", "que es", "ensename",
-    "explique", "comment fonctionne", "qu'est-ce que"
+    "explica", "como funciona", "¿cómo funciona", "que es", "ensename", "diferencia entre",
+    "explique", "comment fonctionne", "qu'est-ce que", "quelle est", "différence entre", "comparaison"
 ]
 
 # Workspace scope indicators (referring to local repo/project)
@@ -87,7 +94,8 @@ MUTATING_VERBS = [
     "fix karo", "fix kar do", "fix kar de", "fix kardo", "fix karde",
     "sahi karo", "sahi kar do", "sahi kardo", "sahi karde", "badlo", "change karo", "update karo",
     # Spanish / French
-    "arregla", "corrige", "modifica", "repara", "modifie", "repare"
+    "arregla", "corrige", "modifica", "repara", "actualiza",
+    "modifie", "repare", "met à jour", "mets à jour"
 ]
 
 EXECUTION_INDICATORS = [
@@ -96,7 +104,7 @@ EXECUTION_INDICATORS = [
     "run build", "build the project", "verify tests", "run commands", "failing test",
     "commit changes", "commit", "git commit", "run script", "bash command",
     # Hindi / Hinglish
-    "test chalao", "test run karo", "run karke dekho",
+    "test chalao", "test run karo", "run karke dekho", "tests verify karo", "verify karo",
     # Spanish / French
     "ejecuta las pruebas", "corre las pruebas", "ejecuta tests", "lance les tests"
 ]
@@ -105,12 +113,14 @@ BUG_FINDING_INDICATORS = [
     # English
     "find the bug", "find bugs", "locate bug", "search the bug", "diagnose bug",
     "identify bug", "detect bug", "audit codebase", "inspect project", "find issue",
-    "where is the bug", "look for bugs", "audit my codebase",
+    "where is the bug", "look for bugs", "audit my codebase", "search where",
     # Hindi / Hinglish
     "bug dhoondho", "bug dhoondh", "bug dekho", "galti dhoondho", "check karo",
-    "inspect karo", "dikkat dhoondho",
+    "inspect karo", "dikkat dhoondho", "search karo",
     # Spanish / French
-    "busca el fallo", "encuentra el error", "busca bugs", "trouve le bug", "cherche le bug"
+    "busca el fallo", "encuentra el error", "busca bugs", "inspecciona el repositorio",
+    "busca donde", "busca dónde", "trouve le bug", "cherche le bug", "trouve où",
+    "inspecte le code", "inspecte"
 ]
 
 class WorkflowRouter:
@@ -265,7 +275,7 @@ class WorkflowRouter:
                     metadata={"action": "git_inspection"}
                 )
 
-        has_mutation = any(mv in prompt_lower for mv in MUTATING_VERBS)
+        has_mutation = any(bool(re.search(rf"\b{re.escape(mv)}\b", prompt_lower)) for mv in MUTATING_VERBS)
         has_execution = any(ei in prompt_lower for ei in EXECUTION_INDICATORS)
         has_workspace_scope = any(ws in prompt_lower for ws in WORKSPACE_SCOPE_INDICATORS)
         has_bug_finding = any(bf in prompt_lower for bf in BUG_FINDING_INDICATORS)
@@ -299,7 +309,7 @@ class WorkflowRouter:
         # If the user names a specific component/bug to fix, it is a code-modifying agent task!
         targets_specific_fix = any(
             t in prompt_lower
-            for t in ["bug", "issue", "error", "crash", "typo", "leak", "vulnerability", "auth", "login", "problem", "chal nahi raha", "kaam nahi kar raha"]
+            for t in ["bug", "issue", "error", "crash", "typo", "leak", "vulnerability", "auth", "login", "problem", "chal nahi raha", "kaam nahi kar raha", "button", "navbar", "ui", "align"]
         ) and has_mutation
 
         if targets_specific_fix:
@@ -324,9 +334,21 @@ class WorkflowRouter:
             )
 
         # 6. Check for "Find the bug in my project" / code inspection -> Claw Code (Read-Only)
-        is_inspect_search = any(w in words for w in ["search", "grep", "locate", "find", "inspect", "audit", "trace", "dhoondh", "dhoondho", "dhundo", "dhundh", "khojo", "where"])
-        has_code_scope = has_workspace_scope or any(w in words for w in ["project", "repo", "codebase", "files", "code", "service", "app", "module", "backend", "frontend", "api", "auth", "component", "function", "class"])
-        is_location_query = bool(re.search(r"\bwhere\b.*\b(?:defined|located|implemented|stored|written|found)\b", prompt_lower))
+        is_inspect_search = any(w in words for w in [
+            "search", "grep", "locate", "find", "inspect", "audit", "trace", "check",
+            "busca", "buscar", "inspecciona", "trouve", "trouver", "inspecte", "cherche", "chercher",
+            "dhoondh", "dhoondho", "dhundo", "dhundh", "khojo", "where"
+        ])
+        has_code_scope = has_workspace_scope or any(w in words for w in [
+            "project", "repo", "codebase", "files", "code", "service", "app", "module",
+            "backend", "frontend", "api", "auth", "component", "function", "class",
+            "database", "models", "model", "schema", "routes", "decorator", "decorators",
+            "repositorio", "proyecto", "projet", "modèles", "modèle"
+        ])
+        is_location_query = bool(re.search(
+            r"\b(?:where|donde|dónde|où)\b.*\b(?:defined|located|implemented|stored|written|found|configurada|configurado|définis|défini)\b",
+            prompt_lower
+        ))
 
         if (has_bug_finding or is_inspect_search or is_location_query) and (has_code_scope or "bug" in words or "issue" in words or is_location_query):
             if not has_mutation and not has_execution:

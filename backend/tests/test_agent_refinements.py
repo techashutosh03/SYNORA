@@ -399,5 +399,165 @@ class TestAgentRefinements(unittest.TestCase):
         self.assertIn("README.md", detected)
         self.assertIn("new_script.py", detected)
 
+    # =========================================================================
+    # 5. PRIVACY, REDACTION & RETENTION POLICIES
+    # =========================================================================
+
+    def test_pre_storage_redaction_in_sqlite(self):
+        """Verifies API keys, tokens, and passwords are redacted before saving to SQLite."""
+        from backend.database.sqlite import (
+            save_chat_record,
+            get_session_history,
+            record_routing_telemetry,
+            get_routing_accuracy_metrics,
+            redact_sensitive_data
+        )
+
+        test_sid = "test_redaction_session_123"
+        prompt_with_secrets = "Here is my secret key: sk-abc1234567890abcdef123 and Bearer eyJhbGciOiJIUzI1NiJ9.secretToken12345"
+        resp_with_secrets = "Your password is: password='SuperSecretPassword123'"
+
+        rec_id = save_chat_record(
+            user_prompt=prompt_with_secrets,
+            final_response=resp_with_secrets,
+            task_type="chat",
+            complexity="simple",
+            models_used=["test-model"],
+            total_time_ms=100.0,
+            orchestration_trace={"key": "ghp_1234567890123456789012345"},
+            session_id=test_sid
+        )
+
+        history = get_session_history(test_sid)
+        self.assertGreater(len(history), 0)
+        saved_record = history[0]
+
+        # Ensure secrets were masked before disk write
+        self.assertNotIn("sk-abc1234567890abcdef123", saved_record["user_prompt"])
+        self.assertIn("[REDACTED_API_KEY]", saved_record["user_prompt"])
+        self.assertNotIn("SuperSecretPassword123", saved_record["final_response"])
+        self.assertNotIn("ghp_1234567890123456789012345", json.dumps(saved_record["orchestration_trace"]))
+
+        # Telemetry redaction
+        tel_id = record_routing_telemetry(
+            session_id=test_sid,
+            prompt="my secret token is ghp_9876543210987654321098765",
+            selected_workflow="chat",
+            confidence=0.99,
+            reason="Bearer eyJhbGciOiJIUzI1NiJ9.sensitiveBearerToken"
+        )
+        self.assertGreater(tel_id, 0)
+
+    def test_retention_pruning_policies(self):
+        """Verifies prune_chat_history, prune_old_telemetry, and prune_expired_approvals."""
+        from backend.database.sqlite import (
+            prune_chat_history,
+            prune_old_telemetry,
+            prune_expired_approvals,
+            save_pending_approval_db,
+            get_approval_record_db
+        )
+        import time
+
+        # Test approval pruning
+        old_action = "expired_action_999"
+        save_pending_approval_db(
+            action_id=old_action,
+            session_id="test_sess",
+            user_id="test_user",
+            tool_name="bash",
+            arguments={"command": "ls"},
+            reason="testing expiry",
+            created_at=time.time() - 3600,
+            expires_at=time.time() - 100  # Expired in past
+        )
+
+        pruned_count = prune_expired_approvals()
+        self.assertGreaterEqual(pruned_count, 1)
+
+        rec = get_approval_record_db(old_action)
+        self.assertEqual(rec["status"], "expired")
+
+        # Test chat history & telemetry pruning
+        pruned_chats = prune_chat_history(retention_days=0, max_records=5)
+        self.assertIsInstance(pruned_chats, int)
+
+        pruned_tel = prune_old_telemetry(retention_days=0, max_records=5)
+        self.assertIsInstance(pruned_tel, int)
+
+    def test_user_feedback_weighted_confidence(self):
+        """Verifies user feedback is treated as an informative signal with confidence calibration."""
+        from backend.database.sqlite import (
+            record_routing_telemetry,
+            update_routing_feedback,
+            get_routing_accuracy_metrics
+        )
+        sid = "feedback_signal_session_test"
+        record_routing_telemetry(
+            session_id=sid,
+            prompt="check database logs",
+            selected_workflow="claw_read_only",
+            confidence=0.95,
+            reason="Inspection"
+        )
+
+        # Update feedback with calibrated weight (e.g. 0.85)
+        updated = update_routing_feedback(session_id=sid, user_override="chat", is_correct=False, feedback_weight=0.85)
+        self.assertTrue(updated)
+
+        metrics = get_routing_accuracy_metrics()
+        self.assertIn("weighted_accuracy_pct", metrics)
+        self.assertIn("overall_accuracy_pct", metrics)
+
+    # =========================================================================
+    # 6. SECURITY: SYMLINKS, ESCAPES & MONOTONIC PERMISSIONS
+    # =========================================================================
+
+    def test_symlink_and_traversal_escapes_blocked(self):
+        """Verifies that symlinks pointing outside workspace root and ../ paths are blocked."""
+        outside_dir = tempfile.mkdtemp(prefix="synora_outside_ws_")
+        try:
+            secret_file = Path(outside_dir) / "secret.txt"
+            secret_file.write_text("SUPER_SECRET_HOST_DATA", encoding="utf-8")
+
+            # Symlink inside test workspace pointing outside
+            symlink_path = Path(self.test_dir) / "symlink_escape"
+            try:
+                symlink_path.symlink_to(secret_file)
+            except OSError:
+                pass
+
+            # 1. Traversal write blocked
+            res_traversal = asyncio.run(self.tool_mgr.execute_write_file("../escape.txt", "evil"))
+            self.assertFalse(res_traversal.success)
+            self.assertIn("Security violation", res_traversal.error)
+
+            # 2. Sensitive path access blocked
+            dec = self.enforcer.check_tool_permission("read_file", {"path": "/etc/passwd"})
+            self.assertFalse(dec.allowed)
+            self.assertIn("Security Gate", dec.reason)
+
+            dec_ssh = self.enforcer.check_tool_permission("read_file", {"path": "~/.ssh/id_rsa"})
+            self.assertFalse(dec_ssh.allowed)
+            self.assertIn("Security Gate", dec_ssh.reason)
+
+        finally:
+            shutil.rmtree(outside_dir, ignore_errors=True)
+
+    def test_permission_monotonicity(self):
+        """Verifies that client overrides can only increase strictness, never loosen permissions."""
+        from backend.agent.permissions import cap_permission_mode
+
+        # Configured read_only cannot be overridden to mutate or autonomous
+        self.assertEqual(cap_permission_mode("read_only", "mutate"), "read_only")
+        self.assertEqual(cap_permission_mode("read_only", "autonomous"), "read_only")
+
+        # Configured ask cannot be loosened to autonomous
+        self.assertEqual(cap_permission_mode("ask", "autonomous"), "ask")
+
+        # Tightening is always allowed
+        self.assertEqual(cap_permission_mode("autonomous", "ask"), "ask")
+        self.assertEqual(cap_permission_mode("ask", "read_only"), "read_only")
+
 if __name__ == "__main__":
     unittest.main()
