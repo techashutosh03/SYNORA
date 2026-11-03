@@ -1,6 +1,7 @@
 import re
 import time
-from typing import List, Dict, Any, Optional, Set
+import uuid
+from typing import List, Dict, Any, Optional, Set, Tuple
 from pydantic import BaseModel, Field
 from backend.config import settings
 from backend.models.registry import model_registry, ModelProfile
@@ -11,6 +12,11 @@ from backend.core.model_availability import (
     OllamaOfflineError
 )
 from backend.core.model_fallback import FALLBACK_MODELS
+from backend.core.workflow_router import workflow_router, WorkflowDecision, WorkflowType
+from backend.database.sqlite import (
+    record_routing_telemetry,
+    get_model_tool_stats
+)
 
 def resolve_model(task_type: str, exclude: Optional[Set[str]] = None) -> Optional[str]:
     """Selects the highest priority installed candidate model for a given task type."""
@@ -30,6 +36,11 @@ class RoutingDecision(BaseModel):
     plan: OrchestrationPlan
     routing_time_ms: float = 0.0
     is_agentic_task: bool = False
+    workflow: Optional[WorkflowDecision] = None
+    workflow_override: Optional[str] = None
+    routing_explanation: str = ""
+    fallback_used: bool = False
+    fallback_reason: Optional[str] = None
 
 MULTILINGUAL_GREETINGS = {
     # English
@@ -109,14 +120,24 @@ class Router:
             }
         }
 
-    def _score_model_fitness(self, model: ModelProfile, target_role: str, domain: str, complexity: str) -> float:
+    def _score_model_fitness(
+        self,
+        model: ModelProfile,
+        target_role: str,
+        domain: str,
+        complexity: str,
+        requires_tools: bool = False,
+        ignore_installation: bool = False
+    ) -> float:
         """
-        Multi-factor scoring algorithm to select the best model from the 30-model catalog:
+        Multi-factor scoring algorithm to select the best model from the catalog:
         - Domain specialty match: +4.0
         - Role match (specialist/reviewer/synthesizer): +3.0
         - Installed in Ollama boost: +2.5
         - Context window headroom: +1.0
         - Parameter scale appropriateness: +1.0
+        - Capabilities: Streaming & Structured Output: +0.5 each
+        - Tool calling capability & empirical tool-calling success rate: up to +3.0
         """
         score = 0.0
 
@@ -132,8 +153,8 @@ class Router:
         matched_specs = [s for s in model.specialties if domain.lower() in s.lower() or s.lower() in domain.lower()]
         score += min(len(matched_specs) * 2.0, 4.0)
 
-        # 3. Installation availability boost (prioritizes downloaded models)
-        if model.is_installed:
+        # 3. Installation availability boost (prioritizes downloaded models unless ignore_installation=True)
+        if not ignore_installation and model.is_installed:
             score += 2.5
 
         # 4. Context window capability
@@ -152,24 +173,102 @@ class Router:
         elif complexity == "simple" and params_num <= 8.0:
             score += 1.0
 
+        # 6. Capabilities: Streaming & Structured Output
+        if model.supports_streaming:
+            score += 0.5
+        if model.supports_structured_output:
+            score += 0.5
+
+        # 7. Tool-call capability and empirical success rate
+        if requires_tools:
+            if not model.supports_tools:
+                score -= 10.0
+            else:
+                try:
+                    stats = get_model_tool_stats(model.id)
+                    rate = stats.get("success_rate", model.measured_tool_success_rate)
+                except Exception:
+                    rate = model.measured_tool_success_rate
+                score += rate * 3.0
+
         return score
 
-    def select_best_model(self, target_role: str, domain: str, complexity: str) -> str:
-        """Selects the best active model using multi-factor fitness scoring."""
+    def select_best_model(
+        self,
+        target_role: str,
+        domain: str,
+        complexity: str = "medium",
+        requires_tools: bool = False,
+        simulate: bool = False,
+        exclude: Optional[Set[str]] = None,
+        return_details: bool = False
+    ) -> Any:
+        """
+        Selects the best active model using multi-factor fitness scoring with pre-filtering:
+        1. Filters out unavailable models before scoring (when not simulating).
+        2. Filters for tool support if requires_tools is True.
+        3. Scores using empirical tool success rate, capabilities, domain, and role.
+        4. Detects fallback when preferred/ideal model is unavailable.
+        """
         active_models = model_registry.list_models(active_only=True)
         if not active_models:
             active_models = list(model_registry._models.values())
 
-        best_model = None
-        highest_score = -1.0
+        if exclude:
+            active_models = [m for m in active_models if m.id not in exclude]
 
-        for model in active_models:
-            fitness = self._score_model_fitness(model, target_role, domain, complexity)
+        # Determine theoretical ideal model across ALL catalog models before filtering (ignoring installation status)
+        ideal_model = None
+        highest_ideal_score = -999.0
+        for m in model_registry.list_models(active_only=False):
+            if exclude and m.id in exclude:
+                continue
+            sc = self._score_model_fitness(m, target_role, domain, complexity, requires_tools=requires_tools, ignore_installation=True)
+            if sc > highest_ideal_score:
+                highest_ideal_score = sc
+                ideal_model = m
+
+        # Pre-filter candidates: strictly filter out unavailable models before scoring
+        fallback_used = False
+        fallback_reason = None
+        candidates = active_models
+
+        if not simulate:
+            installed = [
+                m for m in candidates
+                if m.is_installed or model_availability.is_installed(m.id)
+            ]
+            if installed:
+                candidates = installed
+            else:
+                fallback_used = True
+                fallback_reason = "No installed models found in active pool; fell back to catalog candidate."
+
+        if requires_tools:
+            tool_supported = [m for m in candidates if m.supports_tools]
+            if tool_supported:
+                candidates = tool_supported
+            else:
+                fallback_used = True
+                fallback_reason = (fallback_reason or "") + " No candidates with tool calling support available; fell back to default."
+
+        best_model = None
+        highest_score = -999.0
+        for model in candidates:
+            fitness = self._score_model_fitness(model, target_role, domain, complexity, requires_tools=requires_tools)
             if fitness > highest_score:
                 highest_score = fitness
                 best_model = model
 
-        return best_model.id if best_model else "llama3.1:8b"
+        chosen_id = best_model.id if best_model else (FALLBACK_MODELS.get(domain, ["qwen2.5-coder:7b"])[0])
+
+        if ideal_model and ideal_model.id != chosen_id and not ideal_model.is_installed and not simulate:
+            fallback_used = True
+            fallback_reason = f"Preferred model '{ideal_model.name}' ({ideal_model.id}) not installed; selected '{chosen_id}' as fallback."
+
+        if return_details:
+            return chosen_id, fallback_used, fallback_reason
+        return chosen_id
 
     def analyze_request(self, prompt: str, context: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -330,6 +429,14 @@ class Router:
         stages: List[StageConfig] = []
         available_count = len(distinct_models)
 
+        # Detect fallback
+        preferred_specialist = FALLBACK_MODELS.get(spec_cat, ["qwen2.5-coder:7b"])[0]
+        fb_used = False
+        fb_reason = None
+        if spec_model != preferred_specialist and not simulate:
+            fb_used = True
+            fb_reason = f"Preferred specialist '{preferred_specialist}' not available; using '{spec_model}' as fallback."
+
         # Target stage count determined by task complexity and capability benefits:
         # - simple complexity: 1 model (Direct Answer) regardless of how many models are installed
         # - medium complexity: up to 2 models (Specialist + Reviewer)
@@ -361,7 +468,9 @@ class Router:
                 task_type=task_type,
                 complexity=complexity,
                 stages=stages,
-                synthesis_required=False
+                synthesis_required=False,
+                fallback_used=fb_used,
+                fallback_reason=fb_reason
             )
 
         if target_stages == 2:
@@ -409,7 +518,9 @@ class Router:
                 task_type=task_type,
                 complexity=complexity,
                 stages=stages,
-                synthesis_required=True
+                synthesis_required=True,
+                fallback_used=fb_used,
+                fallback_reason=fb_reason
             )
 
         # target_stages == 3: Full collaboration
@@ -475,12 +586,66 @@ class Router:
             task_type=task_type,
             complexity=complexity,
             stages=stages,
-            synthesis_required=True
+            synthesis_required=True,
+            fallback_used=fb_used,
+            fallback_reason=fb_reason
         )
 
-    async def route(self, prompt: str, context: Optional[str] = None, simulate: bool = False) -> RoutingDecision:
+    async def route(
+        self,
+        prompt: str,
+        context: Optional[str] = None,
+        simulate: bool = False,
+        workflow_override: Optional[str] = None,
+        session_id: Optional[str] = None
+    ) -> RoutingDecision:
         """Determines the routing decision and execution plan for a user prompt asynchronously."""
         start = time.perf_counter()
+
+        # Step 0: Workflow Routing Layer (Executed BEFORE model selection)
+        workflow = workflow_router.classify(prompt, context=context, workflow_override=workflow_override)
+
+        # Record telemetry to SQLite for measuring routing accuracy
+        sid = session_id or str(uuid.uuid4())
+        try:
+            record_routing_telemetry(
+                session_id=sid,
+                prompt=prompt,
+                selected_workflow=workflow.workflow_type.value,
+                confidence=workflow.confidence,
+                reason=workflow.reason,
+                user_override=workflow_override
+            )
+        except Exception:
+            pass
+
+        wf_label = workflow.workflow_type.value.replace("_", " ").title()
+        explanation = f"Selected: {wf_label} (confidence: {round(workflow.confidence * 100, 1)}%). Reason: {workflow.reason}"
+
+        # Ambiguous request -> Return clarification immediately
+        if workflow.workflow_type == WorkflowType.CLARIFICATION:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            return RoutingDecision(
+                task_type="clarification",
+                sub_domain="ambiguous_request",
+                complexity="simple",
+                is_follow_up=False,
+                confidence=workflow.confidence,
+                recommended_models=[],
+                plan=OrchestrationPlan(
+                    task_type="clarification",
+                    complexity="simple",
+                    stages=[],
+                    synthesis_required=False
+                ),
+                routing_time_ms=round(elapsed_ms, 3),
+                is_agentic_task=False,
+                workflow=workflow,
+                workflow_override=workflow_override,
+                routing_explanation=explanation,
+                fallback_used=False,
+                fallback_reason=None
+            )
 
         # Step 1: Refresh model availability from Ollama
         await model_availability.refresh()
@@ -519,7 +684,13 @@ class Router:
                 confidence=1.0,
                 recommended_models=[selected_model],
                 plan=plan,
-                routing_time_ms=round(elapsed_ms, 3)
+                routing_time_ms=round(elapsed_ms, 3),
+                is_agentic_task=False,
+                workflow=workflow,
+                workflow_override=workflow_override,
+                routing_explanation=explanation,
+                fallback_used=False,
+                fallback_reason=None
             )
 
         # Non-greeting request validation
@@ -546,6 +717,11 @@ class Router:
 
         models = [stage.model_id for stage in plan.stages]
 
+        is_agentic = workflow.workflow_type in (
+            WorkflowType.CLAW_READ_ONLY,
+            WorkflowType.CLAW_CONFIRMATION
+        ) or analysis.get("is_agentic_task", False)
+
         return RoutingDecision(
             task_type=analysis["task_type"],
             sub_domain=analysis["sub_domain"],
@@ -555,7 +731,12 @@ class Router:
             recommended_models=models,
             plan=plan,
             routing_time_ms=round(elapsed_ms, 3),
-            is_agentic_task=analysis.get("is_agentic_task", False)
+            is_agentic_task=is_agentic,
+            workflow=workflow,
+            workflow_override=workflow_override,
+            routing_explanation=explanation,
+            fallback_used=plan.fallback_used,
+            fallback_reason=plan.fallback_reason
         )
 
 router = Router()

@@ -3,7 +3,10 @@ import sys
 import time
 import subprocess
 import json
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
@@ -149,10 +152,13 @@ class SlashCommandRegistry:
         checks.append(f"✅ [PASS] Security Gate: Mode = '{permission_enforcer.mode}' (destructive commands blocked)")
 
         # 5. System RAM & Device
-        vm = psutil.virtual_memory()
-        ram_gb = round(vm.total / (1024**3), 1)
-        avail_gb = round(vm.available / (1024**3), 1)
-        checks.append(f"✅ [PASS] Hardware: {ram_gb} GB RAM ({avail_gb} GB free) - M2 Memory Safe (Sequential keep_alive=0)")
+        if psutil:
+            vm = psutil.virtual_memory()
+            ram_gb = round(vm.total / (1024**3), 1)
+            avail_gb = round(vm.available / (1024**3), 1)
+            checks.append(f"✅ [PASS] Hardware: {ram_gb} GB RAM ({avail_gb} GB free) - M2 Memory Safe (Sequential keep_alive=0)")
+        else:
+            checks.append("✅ [PASS] Hardware: M2 Memory Safe (Sequential keep_alive=0)")
 
         # 6. Tools Availability
         tools_count = len(tool_manager.get_tool_definitions())

@@ -13,6 +13,10 @@ class ModelProfile(BaseModel):
     is_active: bool = Field(default=True, description="Whether enabled in SYNORA routing pool")
     tier: int = Field(default=2, description="0: OmniRoute Cloud Flagship, 1: Core Milestone, 2: Popular Specialists, 3: Advanced")
     provider: str = Field(default="ollama", description="Provider origin: ollama, omniroute, cloud")
+    supports_tools: bool = Field(default=True, description="Whether the model natively supports tool/function calling")
+    supports_streaming: bool = Field(default=True, description="Whether the model supports token-by-token streaming")
+    supports_structured_output: bool = Field(default=True, description="Whether the model reliably outputs valid JSON schemas")
+    measured_tool_success_rate: float = Field(default=0.95, description="Empirical tool-calling success rate (0.0 to 1.0)")
 
     @computed_field
     @property

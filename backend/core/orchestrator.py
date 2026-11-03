@@ -16,6 +16,8 @@ class OrchestrationPlan(BaseModel):
     complexity: str
     stages: List[StageConfig]
     synthesis_required: bool = False
+    fallback_used: bool = False
+    fallback_reason: Optional[str] = None
 
 class StageResult(BaseModel):
     stage_name: str

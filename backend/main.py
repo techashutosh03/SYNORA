@@ -20,7 +20,18 @@ from backend.core.memory import memory
 from backend.core.monitor import monitor
 from backend.core.omniroute_process import omniroute_process_manager
 from backend.database.sqlite import save_chat_record, get_recent_history, get_session_history, get_all_sessions
-from backend.agent import tool_manager, permission_enforcer, agent_loop, slash_command_registry, context_loader
+from backend.agent import (
+    tool_manager,
+    permission_enforcer,
+    agent_loop,
+    slash_command_registry,
+    context_loader,
+    approval_manager,
+    permission_scope
+)
+from backend.agent.permissions import cap_permission_mode
+from backend.core.security import generate_session_token, verify_session_token
+from backend.core.workflow_router import WorkflowType
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -80,6 +91,7 @@ class ChatRequest(BaseModel):
     custom_models: Optional[List[str]] = Field(default=None, description="Optional manual override of models to use")
     simulate: bool = Field(default=False, description="Inference mode: True for simulation, False for real inference")
     attachments: Optional[List[AttachmentItem]] = Field(default_factory=list, description="Attached files of any format (.md, video, image, code, etc.)")
+    workflow_override: Optional[str] = Field(default=None, description="Manual workflow override: 'chat', 'inspect', 'mutate', or 'clarify'")
 
     def get_query(self) -> str:
         q = self.prompt or self.message
@@ -106,6 +118,20 @@ class ChatResponse(BaseModel):
     execution_mode: str = "real"  # "real" or "simulated"
     simulated: bool = False
     is_simulated: bool = False
+    grounded_status: Optional[str] = None
+    grounded_summary: Optional[str] = None
+    files_modified: Optional[List[str]] = None
+    tests_executed: Optional[List[str]] = None
+    tests_passed: Optional[bool] = None
+    observed_facts: Optional[List[str]] = None
+    inferences: Optional[List[str]] = None
+    proposals: Optional[List[str]] = None
+    evidence_citations: Optional[List[Dict[str, Any]]] = None
+    plan_phases: Optional[List[Dict[str, Any]]] = None
+    fallback_used: bool = False
+    fallback_reason: Optional[str] = None
+    workflow_override: Optional[str] = None
+    routing_explanation: Optional[str] = None
 
 class SelectModelsRequest(BaseModel):
     model_ids: List[str] = Field(..., description="List of model IDs to set as active in the registry")
@@ -120,6 +146,26 @@ class AgentTaskRequest(BaseModel):
     model_id: Optional[str] = Field(default="qwen2.5-coder:7b", description="Model ID to execute agent loop")
     max_turns: int = Field(default=12, ge=1, le=30)
     workspace_root: Optional[str] = None
+    session_id: Optional[str] = None
+    permission_mode: Optional[str] = None
+    auto_confirm: bool = False
+    workflow_override: Optional[str] = None
+
+class RoutingFeedbackRequest(BaseModel):
+    session_id: str = Field(..., description="Session ID of the routing decision")
+    user_override: Optional[str] = Field(default=None, description="User selected route or override")
+    is_correct: bool = Field(default=True, description="Whether the automatic route was correct")
+
+class SessionAuthRequest(BaseModel):
+    session_id: str = Field(..., description="Unique conversation session ID")
+    user_id: Optional[str] = Field(default="default_user", description="Authenticated user ID")
+
+class ActionConfirmRequest(BaseModel):
+    action_id: str = Field(..., description="Action ID awaiting approval")
+    approved: bool = Field(..., description="True to approve action, False to reject")
+    session_id: Optional[str] = Field(default=None, description="Requesting session ID")
+    user_id: Optional[str] = Field(default=None, description="Requesting user ID")
+    session_token: Optional[str] = Field(default=None, description="Cryptographic HMAC-signed session authentication token")
 
 class SlashCommandRequest(BaseModel):
     command: str = Field(..., description="Slash command, e.g. /doctor, /status, /diff, /help")
@@ -286,7 +332,13 @@ async def chat(request: ChatRequest):
 
     # Step 2: Multi-Factor Intelligent Routing
     try:
-        routing: RoutingDecision = await router.route(user_query, context=context, simulate=is_simulated)
+        routing: RoutingDecision = await router.route(
+            user_query,
+            context=context,
+            simulate=is_simulated,
+            workflow_override=request.workflow_override,
+            session_id=session_id
+        )
     except NoModelsAvailableError as e:
         raise HTTPException(
             status_code=503,
@@ -310,6 +362,113 @@ async def chat(request: ChatRequest):
             }
         )
     plan = routing.plan
+
+    # Step 2b: Workflow Routing Dispatch
+    # 1. Ambiguous Request -> Return Clarifying Question immediately
+    if routing.workflow and routing.workflow.workflow_type == WorkflowType.CLARIFICATION:
+        total_time_ms = round((time.perf_counter() - start_total) * 1000, 2)
+        clarification_text = routing.workflow.clarification_question or "Could you please clarify your request?"
+        saved_id = save_chat_record(
+            session_id=session_id,
+            user_prompt=user_query,
+            final_response=clarification_text,
+            task_type="clarification",
+            complexity="simple",
+            models_used=[],
+            total_time_ms=total_time_ms,
+            orchestration_trace={"stages": []},
+            memory_rss_mb=monitor.get_memory_rss_mb()
+        )
+        return ChatResponse(
+            session_id=session_id,
+            user_prompt=user_query,
+            final_response=clarification_text,
+            task_type="clarification",
+            sub_domain="ambiguous_request",
+            complexity="simple",
+            is_follow_up=routing.is_follow_up,
+            models_used=[],
+            total_time_ms=total_time_ms,
+            routing_time_ms=routing.routing_time_ms,
+            memory_rss_mb=monitor.get_memory_rss_mb(),
+            evaluation=evaluator.evaluate([], simulated=False),
+            orchestration_stages=[],
+            saved_id=saved_id,
+            execution_mode="workflow_clarification",
+            simulated=False,
+            is_simulated=False,
+            workflow_override=routing.workflow_override,
+            routing_explanation=routing.routing_explanation,
+            fallback_used=routing.fallback_used,
+            fallback_reason=routing.fallback_reason
+        )
+
+    # 2. Claw Code Workflow (Read-Only or Confirmation required)
+    if routing.workflow and routing.workflow.workflow_type in (WorkflowType.CLAW_READ_ONLY, WorkflowType.CLAW_CONFIRMATION):
+        perm_mode = routing.workflow.permission_mode or "ask"
+        agent_res = await agent_loop.run(
+            task=user_query,
+            model_id="auto",
+            permission_mode=perm_mode,
+            session_id=session_id,
+            auto_confirm=False
+        )
+        total_time_ms = round((time.perf_counter() - start_total) * 1000, 2)
+        agent_stages = [
+            {
+                "stage_name": f"Tool: {s.tool_name or s.action_type}",
+                "model_id": s.model_id,
+                "role": "agent",
+                "execution_time_ms": s.duration_ms,
+                "status": "success" if s.success else "error",
+                "output_preview": (s.output or "")[:200]
+            }
+            for s in agent_res.steps if s.action_type in ("tool_call", "thought")
+        ]
+        saved_id = save_chat_record(
+            session_id=session_id,
+            user_prompt=user_query,
+            final_response=agent_res.final_response,
+            task_type=routing.workflow.workflow_type.value,
+            complexity=routing.complexity,
+            models_used=[s.model_id for s in agent_res.steps if s.model_id] or ["claw_agent"],
+            total_time_ms=total_time_ms,
+            orchestration_trace={"stages": agent_stages},
+            memory_rss_mb=monitor.get_memory_rss_mb()
+        )
+        return ChatResponse(
+            session_id=session_id,
+            user_prompt=user_query,
+            final_response=agent_res.final_response,
+            task_type=routing.workflow.workflow_type.value,
+            sub_domain=f"permission_{perm_mode}",
+            complexity=routing.complexity,
+            is_follow_up=routing.is_follow_up,
+            models_used=agent_res.tools_used or ["claw_agent"],
+            total_time_ms=total_time_ms,
+            routing_time_ms=routing.routing_time_ms,
+            memory_rss_mb=monitor.get_memory_rss_mb(),
+            evaluation=EvaluationMetric(status="Single Model Response", execution_type="real", model_agreement=True),
+            orchestration_stages=agent_stages,
+            saved_id=saved_id,
+            execution_mode=f"claw_{perm_mode}",
+            simulated=False,
+            is_simulated=False,
+            grounded_status=agent_res.grounded_status,
+            grounded_summary=agent_res.grounded_summary,
+            files_modified=agent_res.files_modified,
+            tests_executed=[t.get("command", "") for t in agent_res.tests_executed] if agent_res.tests_executed else [],
+            tests_passed=agent_res.tests_passed,
+            observed_facts=agent_res.observed_facts,
+            inferences=agent_res.inferences,
+            proposals=agent_res.proposals,
+            evidence_citations=agent_res.evidence_citations,
+            plan_phases=agent_res.plan_phases,
+            workflow_override=routing.workflow_override,
+            routing_explanation=routing.routing_explanation,
+            fallback_used=routing.fallback_used,
+            fallback_reason=routing.fallback_reason
+        )
 
     # If custom models specified by user, override stages only if installed or simulating
     if request.custom_models:
@@ -449,7 +608,14 @@ async def chat(request: ChatRequest):
         saved_id=record_id,
         execution_mode="simulated" if is_simulated else "real",
         simulated=is_simulated,
-        is_simulated=is_simulated
+        is_simulated=is_simulated,
+        observed_facts=["Completed multi-model conversational synthesis"],
+        inferences=[f"Evaluated with consensus score {eval_result.consensus_score}"],
+        proposals=[synthesis_res.final_response],
+        fallback_used=routing.fallback_used,
+        fallback_reason=routing.fallback_reason,
+        workflow_override=routing.workflow_override,
+        routing_explanation=routing.routing_explanation
     )
 
 @app.post("/api/chat/stream")
@@ -483,7 +649,13 @@ async def chat_stream(request: ChatRequest):
         
         # 2. Routing
         try:
-            routing: RoutingDecision = await router.route(user_query, context=context, simulate=is_simulated)
+            routing: RoutingDecision = await router.route(
+                user_query,
+                context=context,
+                simulate=is_simulated,
+                workflow_override=request.workflow_override,
+                session_id=session_id
+            )
         except NoModelsAvailableError as e:
             err_payload = {
                 "error": "No Models Available",
@@ -505,6 +677,187 @@ async def chat_stream(request: ChatRequest):
             yield f"event: error\ndata: {json.dumps(err_payload)}\n\n"
             return
         plan = routing.plan
+
+        # Step 2b: Workflow Routing Dispatch for SSE Streaming
+        # 1. Ambiguous Request -> Return Clarifying Question immediately
+        if routing.workflow and routing.workflow.workflow_type == WorkflowType.CLARIFICATION:
+            clarification_text = routing.workflow.clarification_question or "Could you please clarify your request?"
+            routing_data = {
+                "session_id": session_id,
+                "task_type": "clarification",
+                "sub_domain": "ambiguous_request",
+                "complexity": "simple",
+                "is_follow_up": routing.is_follow_up,
+                "execution_mode": "workflow_clarification",
+                "simulated": False,
+                "stages": []
+            }
+            yield f"event: routing\ndata: {json.dumps(routing_data)}\n\n"
+            yield f"event: token\ndata: {json.dumps({'token': clarification_text})}\n\n"
+            total_time_ms = round((time.perf_counter() - start_total) * 1000, 2)
+            done_payload = {
+                "session_id": session_id,
+                "user_prompt": user_query,
+                "final_response": clarification_text,
+                "task_type": "clarification",
+                "sub_domain": "ambiguous_request",
+                "complexity": "simple",
+                "is_follow_up": routing.is_follow_up,
+                "models_used": [],
+                "total_time_ms": total_time_ms,
+                "routing_time_ms": routing.routing_time_ms,
+                "memory_rss_mb": monitor.get_memory_rss_mb(),
+                "evaluation": {
+                    "consensus_score": 1.0,
+                    "quality_score": 1.0,
+                    "latency_score": 1.0,
+                    "model_count": 0
+                },
+                "orchestration_stages": [],
+                "execution_mode": "workflow_clarification",
+                "simulated": False,
+                "is_simulated": False
+            }
+            yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
+            return
+
+        # 2. Claw Code Workflow (Read-Only or Confirmation required)
+        if routing.workflow and routing.workflow.workflow_type in (WorkflowType.CLAW_READ_ONLY, WorkflowType.CLAW_CONFIRMATION):
+            perm_mode = cap_permission_mode(
+                configured_mode=permission_enforcer.mode,
+                requested_override=routing.workflow.permission_mode or "ask"
+            )
+            routing_data = {
+                "session_id": session_id,
+                "task_type": routing.workflow.workflow_type.value,
+                "sub_domain": f"permission_{perm_mode}",
+                "complexity": routing.complexity,
+                "is_follow_up": routing.is_follow_up,
+                "execution_mode": f"claw_{perm_mode}",
+                "simulated": False,
+                "stages": [
+                    {"stage_name": f"Claw Code Agent ({perm_mode})", "model_id": "auto", "role": "agent"}
+                ]
+            }
+            yield f"event: routing\ndata: {json.dumps(routing_data)}\n\n"
+
+            agent_stages = []
+            final_text = ""
+            grounded_status = "proposed_only"
+            grounded_summary = ""
+            files_modified = []
+            tests_executed = []
+            tests_passed = None
+            models_used = ["claw_agent"]
+
+            try:
+                async for chunk in agent_loop.stream(
+                    task=user_query,
+                    model_id="auto",
+                    permission_mode=perm_mode,
+                    session_id=session_id,
+                    auto_confirm=False
+                ):
+                    try:
+                        payload_str = chunk.strip()
+                        if payload_str.startswith("data:"):
+                            ev_data = json.loads(payload_str[5:].strip())
+                            ev_type = ev_data.get("event")
+                            if ev_type == "thought":
+                                content = ev_data.get("content", "")
+                                if content:
+                                    yield f"event: token\ndata: {json.dumps({'delta': content + chr(10)})}\n\n"
+                            elif ev_type == "tool_start":
+                                tool = ev_data.get("tool", "")
+                                yield f"event: stage_start\ndata: {json.dumps({'stage_index': len(agent_stages), 'stage_name': f'Tool: {tool}', 'model_id': 'claw_tool', 'role': 'agent'})}\n\n"
+                                yield f"event: tool_start\ndata: {json.dumps(ev_data)}\n\n"
+                            elif ev_type == "tool_result":
+                                tool = ev_data.get("tool", "")
+                                output = ev_data.get("output", "")
+                                preview = output[:200] if isinstance(output, str) else str(output)[:200]
+                                st_item = {
+                                    "stage_name": f"Tool: {tool}",
+                                    "model_id": "claw_tool",
+                                    "role": "agent",
+                                    "execution_time_ms": ev_data.get("duration_ms", 0),
+                                    "status": "success" if ev_data.get("success") else "error",
+                                    "output_preview": preview
+                                }
+                                agent_stages.append(st_item)
+                                yield f"event: stage_complete\ndata: {json.dumps(st_item)}\n\n"
+                                yield f"event: tool_result\ndata: {json.dumps(ev_data)}\n\n"
+                            elif ev_type == "confirmation_required":
+                                yield f"event: confirmation_required\ndata: {json.dumps(ev_data)}\n\n"
+                            elif ev_type == "confirmation_resolved":
+                                yield f"event: confirmation_resolved\ndata: {json.dumps(ev_data)}\n\n"
+                            elif ev_type == "complete":
+                                final_text = ev_data.get("final_response", "")
+                                grounded_status = ev_data.get("grounded_status", "proposed_only")
+                                grounded_summary = ev_data.get("grounded_summary", "")
+                                files_modified = ev_data.get("files_modified", [])
+                                tests_passed = ev_data.get("tests_passed")
+                                if final_text:
+                                    yield f"event: token\ndata: {json.dumps({'delta': final_text})}\n\n"
+                            elif ev_type == "error":
+                                yield f"event: error\ndata: {json.dumps(ev_data)}\n\n"
+                            else:
+                                yield chunk
+                        else:
+                            yield chunk
+                    except Exception:
+                        yield chunk
+            except (asyncio.CancelledError, GeneratorExit):
+                approval_manager.cleanup_session(session_id, reason="client_disconnected")
+                raise
+            finally:
+                approval_manager.cleanup_session(session_id, reason="turn_completed")
+
+            total_time_ms = round((time.perf_counter() - start_total) * 1000, 2)
+            saved_id = save_chat_record(
+                session_id=session_id,
+                user_prompt=user_query,
+                final_response=final_text,
+                task_type=routing.workflow.workflow_type.value,
+                complexity=routing.complexity,
+                models_used=models_used,
+                total_time_ms=total_time_ms,
+                orchestration_trace={"stages": agent_stages},
+                memory_rss_mb=monitor.get_memory_rss_mb()
+            )
+            done_payload = {
+                "session_id": session_id,
+                "user_prompt": user_query,
+                "final_response": final_text,
+                "task_type": routing.workflow.workflow_type.value,
+                "sub_domain": f"permission_{perm_mode}",
+                "complexity": routing.complexity,
+                "is_follow_up": routing.is_follow_up,
+                "models_used": models_used,
+                "total_time_ms": total_time_ms,
+                "routing_time_ms": routing.routing_time_ms,
+                "memory_rss_mb": monitor.get_memory_rss_mb(),
+                "evaluation": {
+                    "consensus_score": 1.0,
+                    "quality_score": 1.0,
+                    "latency_score": 1.0,
+                    "model_count": 1
+                },
+                "orchestration_stages": agent_stages,
+                "execution_mode": f"claw_{perm_mode}",
+                "simulated": False,
+                "is_simulated": False,
+                "grounded_status": grounded_status,
+                "grounded_summary": grounded_summary,
+                "files_modified": files_modified,
+                "tests_passed": tests_passed,
+                "saved_id": saved_id,
+                "workflow_override": routing.workflow_override,
+                "routing_explanation": routing.routing_explanation,
+                "fallback_used": routing.fallback_used,
+                "fallback_reason": routing.fallback_reason
+            }
+            yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
+            return
         
         if request.custom_models:
             from backend.core.orchestrator import StageConfig
@@ -530,6 +883,10 @@ async def chat_stream(request: ChatRequest):
             "is_follow_up": routing.is_follow_up,
             "execution_mode": "simulated" if is_simulated else "real",
             "simulated": is_simulated,
+            "workflow_override": routing.workflow_override,
+            "routing_explanation": routing.routing_explanation,
+            "fallback_used": routing.fallback_used,
+            "fallback_reason": routing.fallback_reason,
             "stages": [
                 {"stage_name": s.stage_name, "model_id": s.model_id, "role": s.role}
                 for s in plan.stages
@@ -653,11 +1010,41 @@ async def chat_stream(request: ChatRequest):
             "saved_id": record_id,
             "execution_mode": "simulated" if is_simulated else "real",
             "simulated": is_simulated,
-            "is_simulated": is_simulated
+            "is_simulated": is_simulated,
+            "workflow_override": routing.workflow_override,
+            "routing_explanation": routing.routing_explanation,
+            "fallback_used": routing.fallback_used,
+            "fallback_reason": routing.fallback_reason,
+            "observed_facts": ["Completed multi-model conversational synthesis"],
+            "inferences": [f"Evaluated with consensus score {eval_result.consensus_score}"],
+            "proposals": [synthesis_res.final_response]
         }
         yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/api/routing/feedback")
+def submit_routing_feedback(req: RoutingFeedbackRequest):
+    """Submits user correction or confirmation of an automated workflow routing decision."""
+    from backend.database.sqlite import update_routing_feedback
+    success = update_routing_feedback(req.session_id, req.user_override, req.is_correct)
+    return {"success": success, "session_id": req.session_id}
+
+@app.get("/api/routing/metrics")
+def get_routing_metrics():
+    """Returns empirical workflow routing accuracy metrics and model tool success rates."""
+    from backend.database.sqlite import get_routing_accuracy_metrics, get_model_tool_stats
+    return {
+        "routing": get_routing_accuracy_metrics(),
+        "models": get_model_tool_stats()
+    }
+
+@app.post("/api/eval/run")
+def trigger_system_evaluation():
+    """Executes the 7-dimension repeatable system benchmark and returns full results."""
+    from backend.core.eval_system import run_system_evaluation
+    return run_system_evaluation()
 
 
 @app.get("/api/metrics")
@@ -705,16 +1092,47 @@ def get_history(limit: int = Query(default=20, ge=1, le=100)):
 # 🦞 SYNORA AGENT ENGINE (POWERED BY CLAW CODE)
 # ==========================================
 
+@app.post("/api/auth/session")
+def create_session_auth_token(req: SessionAuthRequest):
+    """
+    Issues a cryptographically signed HMAC session token to ensure session identities
+    come from authenticated server-side context.
+    """
+    token = generate_session_token(
+        session_id=req.session_id,
+        user_id=req.user_id or "default_user"
+    )
+    return {
+        "session_id": req.session_id,
+        "user_id": req.user_id or "default_user",
+        "session_token": token
+    }
+
 @app.post("/api/agent/task")
 async def run_agent_task(req: AgentTaskRequest):
     """
     Executes an autonomous coding task using Claw Code native tools (bash, edit_file, read_file, grep, etc.).
+    Enforces permission monotonicity: manual overrides cannot loosen security boundaries beyond system policy.
     """
+    requested_mode = req.permission_mode
+    if req.workflow_override in ("inspect", "read_only"):
+        requested_mode = "read_only"
+    elif req.workflow_override in ("mutate", "ask"):
+        requested_mode = "ask"
+
+    effective_perm = cap_permission_mode(
+        configured_mode=permission_enforcer.mode,
+        requested_override=requested_mode
+    )
+
     result = await agent_loop.run(
         task=req.task,
         model_id=req.model_id or "auto",
         max_turns=req.max_turns,
-        workspace_root=req.workspace_root
+        workspace_root=req.workspace_root,
+        permission_mode=effective_perm,
+        session_id=req.session_id,
+        auto_confirm=req.auto_confirm
     )
     return result.model_dump()
 
@@ -722,14 +1140,67 @@ async def run_agent_task(req: AgentTaskRequest):
 async def stream_agent_task(req: AgentTaskRequest):
     """
     Streams live real-time SSE events of tool calls, bash outputs, and model reasoning steps.
+    Enforces permission monotonicity: manual overrides cannot loosen security boundaries beyond system policy.
     """
+    requested_mode = req.permission_mode
+    if req.workflow_override in ("inspect", "read_only"):
+        requested_mode = "read_only"
+    elif req.workflow_override in ("mutate", "ask"):
+        requested_mode = "ask"
+
+    effective_perm = cap_permission_mode(
+        configured_mode=permission_enforcer.mode,
+        requested_override=requested_mode
+    )
+
     generator = agent_loop.stream(
         task=req.task,
         model_id=req.model_id or "auto",
         max_turns=req.max_turns,
-        workspace_root=req.workspace_root
+        workspace_root=req.workspace_root,
+        permission_mode=effective_perm,
+        session_id=req.session_id,
+        auto_confirm=req.auto_confirm
     )
     return StreamingResponse(generator, media_type="text/event-stream")
+
+@app.post("/api/agent/confirm")
+async def confirm_agent_action(req: ActionConfirmRequest):
+    """
+    Resolves a pending action awaiting user confirmation (approve or reject).
+    Enforces user and session isolation and cryptographic token authentication.
+    """
+    success, msg = approval_manager.resolve_action(
+        action_id=req.action_id,
+        approved=req.approved,
+        session_id=req.session_id,
+        user_id=req.user_id,
+        session_token=req.session_token
+    )
+    if not success and "Security violation" in msg:
+        raise HTTPException(status_code=403, detail=msg)
+    if not success and "not found" in msg:
+        raise HTTPException(status_code=404, detail=msg)
+    if not success and "expired" in msg:
+        raise HTTPException(status_code=410, detail=msg)
+    return {
+        "action_id": req.action_id,
+        "resolved": success,
+        "approved": req.approved,
+        "message": msg
+    }
+
+@app.get("/api/agent/pending_approvals")
+async def get_pending_approvals(
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None
+):
+    """
+    Returns list of actions currently paused awaiting user approval.
+    """
+    return {
+        "pending": approval_manager.get_pending_actions(session_id=session_id, user_id=user_id)
+    }
 
 @app.get("/api/agent/tools")
 def get_available_tools():

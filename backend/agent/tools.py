@@ -8,7 +8,7 @@ import subprocess
 import json
 import httpx
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 class ToolResult(BaseModel):
@@ -382,6 +382,17 @@ class ToolManager:
         start_time = time.perf_counter()
         try:
             file_path = self._resolve_path(path)
+            from backend.agent.permissions import permission_enforcer
+            is_sens, sens_reason = permission_enforcer.is_sensitive_path(file_path)
+            if is_sens:
+                return ToolResult(
+                    tool_name="read_file",
+                    success=False,
+                    output="",
+                    error=f"Security violation: Access to sensitive path blocked ({sens_reason})",
+                    duration_ms=(time.perf_counter() - start_time) * 1000
+                )
+
             if not file_path.exists():
                 return ToolResult(
                     tool_name="read_file",
@@ -435,6 +446,25 @@ class ToolManager:
         start_time = time.perf_counter()
         try:
             file_path = self._resolve_path(path)
+            # Defense-in-depth: Enforce workspace containment (catches symlink escapes and ../)
+            try:
+                if not file_path.resolve().is_relative_to(self.workspace_root.resolve()):
+                    return ToolResult(
+                        tool_name="write_file",
+                        success=False,
+                        output="",
+                        error=f"Security violation: Writing outside workspace boundary is blocked ({file_path})",
+                        duration_ms=(time.perf_counter() - start_time) * 1000
+                    )
+            except (ValueError, RuntimeError):
+                return ToolResult(
+                    tool_name="write_file",
+                    success=False,
+                    output="",
+                    error=f"Security violation: Invalid path resolution for {path}",
+                    duration_ms=(time.perf_counter() - start_time) * 1000
+                )
+
             file_path.parent.mkdir(parents=True, exist_ok=True)
             file_path.write_text(content, encoding="utf-8")
 
@@ -459,6 +489,25 @@ class ToolManager:
         start_time = time.perf_counter()
         try:
             file_path = self._resolve_path(path)
+            # Defense-in-depth: Enforce workspace containment (catches symlink escapes and ../)
+            try:
+                if not file_path.resolve().is_relative_to(self.workspace_root.resolve()):
+                    return ToolResult(
+                        tool_name="edit_file",
+                        success=False,
+                        output="",
+                        error=f"Security violation: Editing outside workspace boundary is blocked ({file_path})",
+                        duration_ms=(time.perf_counter() - start_time) * 1000
+                    )
+            except (ValueError, RuntimeError):
+                return ToolResult(
+                    tool_name="edit_file",
+                    success=False,
+                    output="",
+                    error=f"Security violation: Invalid path resolution for {path}",
+                    duration_ms=(time.perf_counter() - start_time) * 1000
+                )
+
             if not file_path.exists():
                 return ToolResult(
                     tool_name="edit_file",
@@ -793,8 +842,72 @@ class ToolManager:
                 duration_ms=(time.perf_counter() - start_time) * 1000
             )
 
+    def validate_tool_arguments(self, tool_name: str, arguments: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """
+        Validates required parameters and types before tool execution.
+        Returns (is_valid, error_message).
+        """
+        name = tool_name.lower().strip()
+        if not isinstance(arguments, dict):
+            return False, f"Tool arguments for '{tool_name}' must be a dictionary/object."
+
+        if name == "bash":
+            cmd = arguments.get("command")
+            if not cmd or not isinstance(cmd, str) or not cmd.strip():
+                return False, "Argument 'command' must be a non-empty string."
+        elif name == "read_file":
+            p = arguments.get("path")
+            if not p or not isinstance(p, str) or not p.strip():
+                return False, "Argument 'path' must be a non-empty string."
+        elif name == "write_file":
+            p = arguments.get("path")
+            if not p or not isinstance(p, str) or not p.strip():
+                return False, "Argument 'path' must be a non-empty string."
+            if "content" not in arguments:
+                return False, "Argument 'content' is required for write_file."
+        elif name == "edit_file":
+            p = arguments.get("path")
+            if not p or not isinstance(p, str) or not p.strip():
+                return False, "Argument 'path' must be a non-empty string."
+            old_s = arguments.get("old_string")
+            if old_s is None or not isinstance(old_s, str) or len(old_s) == 0:
+                return False, "Argument 'old_string' must be a non-empty string to replace."
+            new_s = arguments.get("new_string")
+            if new_s is None or not isinstance(new_s, str):
+                return False, "Argument 'new_string' must be a string."
+        elif name == "grep_search":
+            q = arguments.get("query")
+            if not q or not isinstance(q, str) or not q.strip():
+                return False, "Argument 'query' must be a non-empty string."
+        elif name == "glob_files":
+            pat = arguments.get("pattern")
+            if not pat or not isinstance(pat, str) or not pat.strip():
+                return False, "Argument 'pattern' must be a non-empty string."
+        elif name in ("git_commit", "commit"):
+            msg = arguments.get("message")
+            if not msg or not isinstance(msg, str) or not msg.strip():
+                return False, "Argument 'message' must be a non-empty string."
+        elif name in ("web_fetch", "fetch"):
+            url = arguments.get("url")
+            if not url or not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://")):
+                return False, "Argument 'url' must be a valid HTTP or HTTPS URL."
+        elif name in ("todo_write", "todos"):
+            todos = arguments.get("todos")
+            if not isinstance(todos, list):
+                return False, "Argument 'todos' must be a list of task items."
+        return True, None
+
     async def dispatch(self, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
-        """Central tool dispatcher."""
+        """Central tool dispatcher with schema and argument validation."""
+        is_valid, val_err = self.validate_tool_arguments(tool_name, arguments)
+        if not is_valid:
+            return ToolResult(
+                tool_name=tool_name,
+                success=False,
+                output="",
+                error=f"Argument validation failed for '{tool_name}': {val_err}"
+            )
+
         name = tool_name.lower().strip()
         if name == "bash":
             return await self.execute_bash(

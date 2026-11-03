@@ -36,6 +36,9 @@ class PerformanceMonitor:
         except Exception:
             return 0.0
 
+    def get_memory_rss_mb(self) -> float:
+        return self.get_current_memory_mb()
+
     def get_storage_status(self) -> Dict[str, Any]:
         """Returns disk space metrics to ensure storage safety on M2."""
         try:
